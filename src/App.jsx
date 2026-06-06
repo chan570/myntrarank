@@ -246,7 +246,7 @@ export default function App() {
 
   return (
     <div className="app-container">
-      {/* Sticky Myntra Header */}
+      {/* Sticky TrustRank Header */}
       <header className="myntra-header">
         <a href="/" className="logo-container" onClick={(e) => { e.preventDefault(); setSearchQuery(""); }}>
           <svg className="logo-svg" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg">
@@ -258,7 +258,7 @@ export default function App() {
             </defs>
             <path d="M15,85 L40,20 L60,60 L85,20 L85,85 L70,85 L70,45 L55,75 L45,75 L20,30 L20,85 Z" fill="url(#logoGrad)" />
           </svg>
-          <div className="logo-text">Myntra<span>Rank</span></div>
+          <div className="logo-text">Trust<span>Rank</span></div>
         </a>
 
         {/* Category Navigation Links */}
