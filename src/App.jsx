@@ -256,7 +256,10 @@ export default function App() {
                 <stop offset="100%" stopColor="#ff6f43" />
               </linearGradient>
             </defs>
-            <path d="M15,85 L40,20 L60,60 L85,20 L85,85 L70,85 L70,45 L55,75 L45,75 L20,30 L20,85 Z" fill="url(#logoGrad)" />
+            {/* Trust Shield Icon */}
+            <path d="M50,15 L80,28 L80,55 C80,72 50,85 50,85 C50,85 20,72 20,55 L20,28 Z" fill="url(#logoGrad)" />
+            {/* Checkmark inside Shield */}
+            <path d="M38,48 L46,56 L62,38" fill="none" stroke="#ffffff" strokeWidth="6" strokeLinecap="round" strokeLinejoin="round" />
           </svg>
           <div className="logo-text">Trust<span>Rank</span></div>
         </a>
