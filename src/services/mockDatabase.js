@@ -1,4 +1,4 @@
-import { generateProducts } from '../data/mockProducts';
+import { generateProducts } from '../data/mockProducts.js';
 
 class MockDatabase {
   constructor() {

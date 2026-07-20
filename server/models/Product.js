@@ -30,4 +30,4 @@ const productSchema = new mongoose.Schema({
   }
 }, { timestamps: true });
 
-export const Product = mongoose.models.Product || mongoose.model('Product', productSchema);
+export const Product = mongoose.models.Product /*if already exist*/|| mongoose.model('Product', productSchema); //if not exist

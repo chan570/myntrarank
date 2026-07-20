@@ -1,4 +1,4 @@
-import { generateProducts } from '../seed/seedDataGenerator.js';
+import { generateProducts } from '../../src/data/mockProducts.js';
 import { Product } from '../models/Product.js';
 import { Review } from '../models/Review.js';
 import { auditProductReviews } from './auditEngine.js';
