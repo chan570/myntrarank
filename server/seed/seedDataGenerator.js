@@ -1,6 +1,6 @@
 /**
- * PROCEDURAL SYNTHETIC PRODUCT & REVIEW DATA GENERATOR
- * Generates 1,100 fashion products and 27,000+ reviews with seedable PRNG LCG.
+ * BACKEND DATABASE SEEDER DATA GENERATOR
+ * Generates initial seed data (1,100 products & 27,000+ reviews) to populate MongoDB on initial startup.
  */
 
 function createRandom(seed) {

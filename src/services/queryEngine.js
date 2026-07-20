@@ -61,7 +61,7 @@ class QueryEngine {
       }
 
       // Filter by average genuine rating
-      if (pre.averageGenuineRating < minRating && pre.rawAvgRating < minRating) {
+      if (minRating > 0 && pre.averageGenuineRating < minRating) {
         continue;
       }
 
@@ -110,11 +110,11 @@ class QueryEngine {
     const queryTime = (performance.now() - startTime).toFixed(2);
 
     return {
-      results: finalRanks.slice(0, 500), // Return top 500 products
+      results: finalRanks,
       queryTime,
       candidateCount: candidates.length,
       matchedCount: matchedDocs.length,
-      returnedCount: Math.min(500, finalRanks.length)
+      returnedCount: finalRanks.length
     };
   }
 }

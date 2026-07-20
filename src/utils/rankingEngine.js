@@ -352,6 +352,6 @@ export function rankProducts(products, query, options = {}) {
   // Step 3: Sort by final ranking score descending
   processedProducts.sort((a, b) => b.finalRankingScore - a.finalRankingScore);
 
-  // Return only top 500 products
-  return processedProducts.slice(0, 500);
+  // Return all processed products
+  return processedProducts;
 }
