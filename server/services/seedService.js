@@ -3,11 +3,13 @@ import { Product } from '../models/Product.js';
 import { Review } from '../models/Review.js';
 import { auditProductReviews } from './auditEngine.js';
 import { openSearchService } from './openSearchEngine.js';
+import { runSparkAuditJob } from './sparkRunner.js';
 
 export async function seedDatabase(isMemoryFallback = false) {
   console.log(`🚀 Initializing TrustRank Database Seeder (Generating 1,100 products & 27,000+ reviews)...`);
 
   const mockData = generateProducts();
+  const auditedProducts = await runSparkAuditJob(mockData);
   let dbProducts = [];
 
   if (!isMemoryFallback) {
@@ -15,9 +17,9 @@ export async function seedDatabase(isMemoryFallback = false) {
       const existingCount = await Product.countDocuments();
       if (existingCount === 0) {
         console.log(`📦 Seeding MongoDB Database with 1,100 products...`);
-        for (let idx = 0; idx < mockData.length; idx++) {
-          const p = mockData[idx];
-          const audited = auditProductReviews(p.reviews);
+        for (let idx = 0; idx < auditedProducts.length; idx++) {
+          const p = auditedProducts[idx];
+          const audited = p.auditedMetrics || auditProductReviews(p.reviews || []);
           const newProd = new Product({
             id: p.id,
             title: p.title,
@@ -51,17 +53,11 @@ export async function seedDatabase(isMemoryFallback = false) {
       dbProducts = await Product.find().lean();
     } catch (err) {
       console.warn(`⚠️ MongoDB Seed Bypass: ${err.message}`);
-      dbProducts = mockData.map(p => ({
-        ...p,
-        auditedMetrics: auditProductReviews(p.reviews)
-      }));
+      dbProducts = auditedProducts;
     }
   } else {
     console.log(`⚡ Seeding In-Memory Data Store...`);
-    dbProducts = mockData.map(p => ({
-      ...p,
-      auditedMetrics: auditProductReviews(p.reviews)
-    }));
+    dbProducts = auditedProducts;
   }
 
   // Populate OpenSearch Engine

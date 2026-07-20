@@ -26,29 +26,11 @@ export function calculateTimeDecay(reviewDate, halfLifeDays = 180) {
   return Math.max(0.20, weight);
 }
 
-// Lexicon-Based NLP Sentiment Analysis
-const POSITIVE_LEXICON = new Set([
-  "amazing", "excellent", "comfortable", "premium", "stylish", "perfect",
-  "soft", "breathable", "clean", "superb", "worth", "highly", "recommend",
-  "love", "best", "great", "awesome", "quality", "good", "nice", "snug"
-]);
+import { analyzeNLPSentiment } from './nlpEngine.js';
 
-const NEGATIVE_LEXICON = new Set([
-  "cheap", "uncomfortable", "dull", "terrible", "loose", "smaller", "faded",
-  "damaged", "overpriced", "stuck", "smells", "bled", "disappointed", "bad",
-  "poor", "worst", "broken", "dirty", "chemical", "thin", "heavy"
-]);
-
+// VADER-Augmented NLP Sentiment Analysis
 export function calculateSentiment(text) {
-  if (!text || typeof text !== 'string') return 0.5;
-  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/);
-  let pos = 0, neg = 0;
-  for (const w of words) {
-    if (POSITIVE_LEXICON.has(w)) pos++;
-    if (NEGATIVE_LEXICON.has(w)) neg++;
-  }
-  const rawRatio = (pos - neg) / (pos + neg + 1);
-  return Math.max(0, Math.min(1, (rawRatio + 1) / 2));
+  return analyzeNLPSentiment(text);
 }
 
 // Multi-Pass Review Auditing Routine
