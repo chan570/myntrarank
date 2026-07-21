@@ -1,5 +1,5 @@
-import { searchIndex } from './searchIndex';
-import { analyzeSentiment, calculateRichness, calculateTimeDecay } from '../utils/rankingEngine';
+import { searchIndex } from './searchIndex.js';
+import { analyzeSentiment, calculateRichness, calculateTimeDecay } from '../utils/rankingEngine.js';
 
 // Fast DJB2 hash for string fingerprinting
 function hashString(str) {
@@ -160,7 +160,12 @@ class OfflinePipeline {
       const recencyScore = weightedDenominator > 0 ? totalRecency / weightedDenominator : 0.2;
       const ratingScore = averageGenuineRating > 0 ? (averageGenuineRating - 1) / 4 : 0;
 
-      const isFlaggedAsFake = authenticityScore < 0.65 || ratingDistributionSuspicious || product.isSuspicious;
+      const isFlaggedAsFake = Boolean(
+        authenticityScore < 0.60 || 
+        ratingDistributionSuspicious || 
+        product.isSuspicious || 
+        (product.anomalyType && product.anomalyType !== "low_review_count")
+      );
 
       if (isFlaggedAsFake) {
         totalFlaggedProducts++;
@@ -187,8 +192,10 @@ class OfflinePipeline {
         discountPercent: product.discountPercent,
         category: product.category,
         tags: product.tags,
-        reviews: analyzedReviews, // Keep reviews inside for detailed client-side drawer inspection
+        anomalyType: product.anomalyType,
         isSuspicious: isFlaggedAsFake,
+        isFlaggedAsFake: isFlaggedAsFake,
+        reviews: analyzedReviews,
         precomputed: {
           authenticityScore,
           sentimentScore,

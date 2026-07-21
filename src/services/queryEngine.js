@@ -1,5 +1,5 @@
-import { searchIndex } from './searchIndex';
-import { calculateRelevance } from '../utils/rankingEngine';
+import { searchIndex } from './searchIndex.js';
+import { calculateRelevance } from '../utils/rankingEngine.js';
 
 class QueryEngine {
   // Simulates real-time search query execution & script scoring on pre-computed search documents
@@ -55,8 +55,16 @@ class QueryEngine {
         continue;
       }
 
+      const isFake = Boolean(
+        doc.isSuspicious || 
+        doc.isFlaggedAsFake || 
+        doc.isFlagged || 
+        (pre && pre.authenticityScore !== undefined && pre.authenticityScore < 0.60) || 
+        (doc.anomalyType && doc.anomalyType !== "low_review_count")
+      );
+
       // Skip products flagged as suspicious if filter active
-      if (removeSuspicious && doc.isSuspicious) {
+      if (removeSuspicious && isFake) {
         continue;
       }
 
@@ -98,7 +106,8 @@ class QueryEngine {
         recencyScore: pre.recencyScore,
         ratingScore: pre.ratingScore,
         finalRankingScore,
-        isFlaggedAsFake: doc.isSuspicious,
+        isFlaggedAsFake: isFake,
+        isSuspicious: isFake,
         flaggedDuplicateCount: doc.reviews.filter(r => r.isDuplicate).length,
         flaggedSpikeCount: doc.reviews.filter(r => r.isSpiked).length
       });

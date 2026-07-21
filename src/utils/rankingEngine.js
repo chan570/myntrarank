@@ -315,7 +315,14 @@ export function rankProducts(products, query, options = {}) {
     // Final sorting score
     const finalRankingScore = normalizedRelevance * combinedSignals;
 
-    const isFlaggedAsFake = authenticityScore < 0.65 || ratingDistributionSuspicious || product.isSuspicious;
+    const isFlaggedAsFake = Boolean(
+      product.isSuspicious || 
+      product.isFlaggedAsFake || 
+      product.isFlagged || 
+      authenticityScore < 0.60 || 
+      ratingDistributionSuspicious || 
+      (product.anomalyType && product.anomalyType !== "low_review_count")
+    );
 
     // Filter out if user selected "Remove Suspicious" and product is flagged as fake
     if (removeSuspicious && isFlaggedAsFake) {

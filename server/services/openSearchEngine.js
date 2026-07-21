@@ -248,10 +248,19 @@ export class OpenSearchEngine {
     const results = hits.map(hit => {
       const doc = hit._source;
       const score = hit._score || 1.0;
+      const m = doc.auditedMetrics || {};
+      const authScore = m.authenticityScore ?? 1.0;
+      const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
+
       return {
         ...doc,
+        authenticityScore: authScore,
+        rawAvgRating: m.genuineRating ?? 4.0,
+        totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
+        isFlaggedAsFake: isFake,
+        isSuspicious: isFake,
         relevanceScore: Number(score.toFixed(2)),
-        compositeTrustScore: Number((doc.auditedMetrics?.authenticityScore || 1.0).toFixed(3)),
+        compositeTrustScore: Number(authScore.toFixed(3)),
         finalRankScore: Number(score.toFixed(3))
       };
     });

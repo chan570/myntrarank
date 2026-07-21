@@ -123,9 +123,39 @@ export function App() {
     });
   }, [searchIndexVersion, searchQuery, weights, removeSuspicious, filterLowReviews, minRatingFilter, activeCategory]);
 
-  // Handle Sort Option
+  const checkIsFakeProduct = (product) => {
+    if (!product) return false;
+    const authScore = product.authenticityScore !== undefined 
+      ? product.authenticityScore 
+      : (product.auditedMetrics?.authenticityScore !== undefined ? product.auditedMetrics.authenticityScore : 1.0);
+    
+    return Boolean(
+      product.isSuspicious || 
+      product.isFlaggedAsFake || 
+      product.isFlagged || 
+      authScore < 0.60 || 
+      (product.anomalyType && product.anomalyType !== "low_review_count")
+    );
+  };
+
+  // Handle Sort & Filtering Controls
   const finalSortedProducts = useMemo(() => {
-    const listCopy = [...searchResult.results];
+    let listCopy = [...searchResult.results];
+
+    // Guarantee filtering out products with fake reviews when removeSuspicious is checked
+    if (removeSuspicious) {
+      listCopy = listCopy.filter(product => !checkIsFakeProduct(product));
+    }
+
+    // Guarantee filtering out products with low review count when filterLowReviews is checked
+    if (filterLowReviews) {
+      listCopy = listCopy.filter(product => {
+        const totalReviews = product.totalReviewsCount ?? product.auditedMetrics?.totalReviewsCount ?? (product.reviews ? product.reviews.length : 0);
+        const isLowReviews = totalReviews < 10 || product.anomalyType === "low_review_count";
+        return !isLowReviews;
+      });
+    }
+
     if (sortOption === "price-asc") {
       listCopy.sort((a, b) => a.price - b.price);
     } else if (sortOption === "price-desc") {
@@ -134,7 +164,7 @@ export function App() {
       listCopy.sort((a, b) => b.rawAvgRating - a.rawAvgRating);
     }
     return listCopy;
-  }, [searchResult, sortOption]);
+  }, [searchResult, sortOption, removeSuspicious, filterLowReviews]);
 
   const formatDate = (timestamp) => {
     const d = new Date(timestamp);
@@ -472,14 +502,9 @@ export function App() {
               {/* Product Grid with Scroll Position Memory */}
               <div className="product-grid">
                 {finalSortedProducts.map((product, index) => {
-                  const isFake = Boolean(
-                    product.isSuspicious || 
-                    product.isFlaggedAsFake || 
-                    product.isFlagged || 
-                    (product.authenticityScore !== undefined && product.authenticityScore < 0.85) || 
-                    (product.anomalyType && product.anomalyType !== "low_review_count")
-                  );
-                  const isLowReviews = !isFake && (product.totalReviewsCount < 10 || product.anomalyType === "low_review_count");
+                  const isFake = checkIsFakeProduct(product);
+                  const totalReviews = product.totalReviewsCount ?? product.auditedMetrics?.totalReviewsCount ?? (product.reviews ? product.reviews.length : 0);
+                  const isLowReviews = !isFake && (totalReviews < 10 || product.anomalyType === "low_review_count");
 
                   return (
                     <div 
