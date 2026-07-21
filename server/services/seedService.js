@@ -61,6 +61,7 @@ export async function seedDatabase(isMemoryFallback = false) {
   }
 
   // Populate OpenSearch Engine
-  openSearchService.bulkIndex(dbProducts);
-  console.log(`🔍 Amazon OpenSearch Index Populated with ${openSearchService.getDocumentCount()} documents.`);
+  await openSearchService.bulkIndex(dbProducts);
+  const count = await openSearchService.getDocumentCount();
+  console.log(`🔍 Amazon OpenSearch Index Populated with ${count} documents.`);
 }

@@ -7,18 +7,19 @@ import apiRoutes from './routes/api.js';
 
 dotenv.config();
 
-const app = express();
+const app = express();//Express Application Object.
 const PORT = process.env.PORT || 5000;
 
 // Middleware
-app.use(cors());
-app.use(express.json());
+app.use(cors());//Allow cross-origin requests.
+app.use(express.json());//Express automatically parses JSON.
 
 // API Routes
-app.use('/api', apiRoutes);
+app.use('/api', apiRoutes);//Any request whose URL starts with /api should be handled by the router defined in routes/api.js.
 
 // Health Endpoint
-app.get('/', (req, res) => {
+app.get('/', (req, res) => { //If this endpoint works,the backend is alive.
+
   res.json({
     status: 'online',
     service: 'TrustRank Enterprise Microservice Gateway',
@@ -35,7 +36,9 @@ async function startServer() {
 
   const isConnected = await connectDB();
   await seedDatabase(!isConnected);
+/*The server does not start listening until the database and seeding are complete.
 
+That prevents users from sending requests before the application is ready. */
   app.listen(PORT, () => {
     console.log(`\n🌐 Express REST API Server running live at: http://localhost:${PORT}`);
     console.log(`📡 Cloud API Endpoints Active:`);

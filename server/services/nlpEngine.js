@@ -34,8 +34,8 @@ let initPromise = null; //model is downloading... as a promise
  * Initialize the ML Transformer Model asynchronously.
  */
 export async function initMLModel() {
-  if (sentimentPipeline) return sentimentPipeline;
-  if (isInitializing) return initPromise;
+  if (sentimentPipeline) return sentimentPipeline; //cache hit
+  if (isInitializing) return initPromise; //everybody shares same promise
 
   isInitializing = true;
   initPromise = (async () => {
@@ -68,7 +68,7 @@ export async function analyzeNLPSentiment(text) {
   try {
     const pipe = await initMLModel();
     if (pipe) {
-      const output = await pipe(text);
+      const output = await pipe(text);//actually tranforming the review into [{label: , score: }]
       if (output && output.length > 0) {
         const { label, score } = output[0];
         // DistilBERT output: POSITIVE or NEGATIVE with confidence score
@@ -78,7 +78,7 @@ export async function analyzeNLPSentiment(text) {
         } else if (label === 'NEGATIVE') {
           sentimentScore = 1.0 - score;
         } else {
-          sentimentScore = score;
+          sentimentScore = score; //just for future resilient(if any other label exist then do not crash)
         }
         return Number(Math.max(0.05, Math.min(0.98, sentimentScore)).toFixed(2));
       }
@@ -125,10 +125,22 @@ const BOOSTERS = {
   "barely": -0.25, "somewhat": -0.15, "hardly": -0.2
 };
 
+//Original VADER researchers assigned scores based on human ratings.
 export function analyzeNLPSentimentSync(text) {
   if (!text || typeof text !== 'string') return 0.5;
 
   const rawWords = text.replace(/[^a-zA-Z0-9\s!?-]/g, '').split(/\s+/).filter(Boolean);
+  /*Why is regex used before splitting?
+
+Answer: It removes unwanted symbols and normalizes the text. This improves dictionary matching and prevents punctuation or special characters from interfering with sentiment analysis.
+
+Q3. Why use \s+ instead of " " in split()?
+
+Answer: \s+ treats one or more whitespace characters (spaces, tabs, newlines) as a single delimiter, preventing empty tokens when multiple spaces appear.
+
+Q4. What does .filter(Boolean) do?
+
+Answer: It removes all falsy values from the array. In this context, it removes empty strings generated during tokenization.*/ 
   if (rawWords.length === 0) return 0.5;
 
   let totalScore = 0;

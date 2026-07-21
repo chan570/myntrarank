@@ -7,7 +7,7 @@ import { Review } from '../models/Review.js';
 const router = express.Router();
 
 // 1. GET /api/search - Execute Search Query
-router.get('/search', (req, res) => {
+router.get('/search', async (req, res) => {
   try {
     const query = req.query.q || '';
     const weights = {
@@ -19,7 +19,7 @@ router.get('/search', (req, res) => {
       rate: req.query.rate ? parseFloat(req.query.rate) : 0.10,
     };
 
-    const searchResponse = openSearchService.executeQuery(query, weights);
+    const searchResponse = await openSearchService.executeQuery(query, weights);
     res.json({
       status: 'success',
       cloudService: 'Amazon OpenSearch Service',
@@ -49,12 +49,12 @@ router.post('/reviews', async (req, res) => {
       images: []
     };
 
-    // Update in-memory search index document
-    const doc = openSearchService.index.get(productId);
+    // Update OpenSearch document directly
+    const doc = await openSearchService.getDocument(productId);
     if (doc) {
       doc.reviews.push(newReview);
       doc.auditedMetrics.isDirty = true;
-      openSearchService.upsertDocument(doc);
+      await openSearchService.upsertDocument(doc);
     }
 
     // Update MongoDB if connected
@@ -86,10 +86,11 @@ router.post('/admin/audit', async (req, res) => {
 
     logs.push(`[${new Date().toISOString()}] SPARK_BATCH_INIT: Sweeping products for dirty records...`);
 
-    for (const doc of openSearchService.index.values()) {
+    const allDocs = await openSearchService.getAllDocuments();
+    for (const doc of allDocs) {
       const audited = await auditProductReviews(doc.reviews);
       doc.auditedMetrics = audited;
-      openSearchService.upsertDocument(doc);
+      await openSearchService.upsertDocument(doc);
       auditedCount++;
 
       // Update MongoDB if connected
@@ -122,7 +123,7 @@ router.post('/admin/inject-bot-attack', async (req, res) => {
   try {
     const { productId } = req.body;
     const targetId = productId || 'prod-1';
-    const doc = openSearchService.index.get(targetId);
+    const doc = await openSearchService.getDocument(targetId);
 
     if (!doc) {
       return res.status(404).json({ status: 'error', message: 'Target product not found' });
@@ -146,7 +147,7 @@ router.post('/admin/inject-bot-attack', async (req, res) => {
     doc.isSuspicious = true;
     doc.anomalyType = 'duplicate_reviews';
     doc.auditedMetrics.isDirty = true;
-    openSearchService.upsertDocument(doc);
+    await openSearchService.upsertDocument(doc);
 
     res.json({
       status: 'success',
@@ -159,7 +160,7 @@ router.post('/admin/inject-bot-attack', async (req, res) => {
 });
 
 // 5. GET /api/stats - System Telemetry
-router.get('/stats', (req, res) => {
+router.get('/stats', async (req, res) => {
   res.json({
     status: 'online',
     appName: 'TrustRank Enterprise Microservice',
@@ -169,7 +170,7 @@ router.get('/stats', (req, res) => {
       auditWorker: 'Apache Spark on AWS EMR'
     },
     metrics: {
-      indexedProducts: openSearchService.getDocumentCount(),
+      indexedProducts: await openSearchService.getDocumentCount(),
       serverTimestamp: new Date().toISOString()
     }
   });
