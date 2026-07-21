@@ -87,7 +87,7 @@ router.post('/admin/audit', async (req, res) => {
     logs.push(`[${new Date().toISOString()}] SPARK_BATCH_INIT: Sweeping products for dirty records...`);
 
     for (const doc of openSearchService.index.values()) {
-      const audited = auditProductReviews(doc.reviews);
+      const audited = await auditProductReviews(doc.reviews);
       doc.auditedMetrics = audited;
       openSearchService.upsertDocument(doc);
       auditedCount++;

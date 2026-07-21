@@ -19,7 +19,7 @@ export async function seedDatabase(isMemoryFallback = false) {
         console.log(`📦 Seeding MongoDB Database with 1,100 products...`);
         for (let idx = 0; idx < auditedProducts.length; idx++) {
           const p = auditedProducts[idx];
-          const audited = p.auditedMetrics || auditProductReviews(p.reviews || []);
+          const audited = p.auditedMetrics || await auditProductReviews(p.reviews || []);
           const newProd = new Product({
             id: p.id,
             title: p.title,

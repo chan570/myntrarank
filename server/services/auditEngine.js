@@ -1,8 +1,10 @@
 /**
  * TRUSTRANK AUDIT ENGINE (Simulated Apache Spark Batch Worker)
  * Implements DJB2 Hashing, Date Density Outlier Detection, Variance Audit, 
- * Exponential Half-Life Time Decay (T_half = 180d), and Lexicon NLP Sentiment.
+ * Exponential Half-Life Time Decay (T_half = 180d), and Real ML Transformer NLP Sentiment.
  */
+
+import { analyzeNLPSentiment } from './nlpEngine.js';
 
 // DJB2 Hash String Primitive
 export function hashString(str) {
@@ -21,20 +23,18 @@ export function calculateTimeDecay(reviewDate, halfLifeDays = 180) {
   const now = Date.now();
   const dateMs = typeof reviewDate === 'number' ? reviewDate : new Date(reviewDate).getTime();
   const diffDays = Math.max(0, (now - dateMs) / (1000 * 60 * 60 * 24));
-  const lambda = Math.LN2 / halfLifeDays; // ~0.00385
+  const lambda = Math.LN2 / halfLifeDays;
   const weight = Math.exp(-lambda * diffDays);
   return Math.max(0.20, weight);
 }
 
-import { analyzeNLPSentiment } from './nlpEngine.js';
-
-// VADER-Augmented NLP Sentiment Analysis
-export function calculateSentiment(text) {
-  return analyzeNLPSentiment(text);
+// ML Transformer NLP Sentiment Analysis
+export async function calculateSentiment(text) {
+  return await analyzeNLPSentiment(text);
 }
 
-// Multi-Pass Review Auditing Routine
-export function auditProductReviews(reviews) {
+// Multi-Pass Review Auditing Routine (Async for ML inference)
+export async function auditProductReviews(reviews) {
   if (!reviews || !Array.isArray(reviews) || reviews.length === 0) {
     return {
       authenticityScore: 1.0,
@@ -119,7 +119,7 @@ export function auditProductReviews(reviews) {
 
   for (const r of validReviews) {
     const decay = calculateTimeDecay(r.date);
-    const sent = calculateSentiment(r.text);
+    const sent = await calculateSentiment(r.text);
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 

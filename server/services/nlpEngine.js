@@ -1,12 +1,95 @@
 /**
- * TRUSTRANK VADER NLP SENTIMENT ENGINE
- * Advanced rule-augmented NLP sentiment analysis implementing:
- * 1. Lexicon Valence Scores (-4.0 to +4.0)
- * 2. Negation Handling ("not bad", "never good", "hardly comfortable")
- * 3. Booster/Dampener Words ("very", "extremely", "slightly")
- * 4. Capitalization & Punctuation Intensity ("GREAT!!!", "AMAZING")
- * 5. Contrastive Conjunction Weighting ("good quality, but expensive")
+ * TRUSTRANK REAL ML NLP SENTIMENT ENGINE
+ * Powered by Hugging Face Transformers.js (@xenova/transformers)
+ * Model: Xenova/distilbert-base-uncased-finetuned-sst-2-english
+ * Fallback: Rule-augmented VADER Lexicon engine
  */
+
+import { pipeline } from '@xenova/transformers';
+
+let sentimentPipeline = null; //model
+let isInitializing = false;
+/*100 users arrive together.
+100 Downloads
+
+100 Copies
+
+Crash Therefore developer added
+
+isInitializing
+
+Initially=false means
+
+Nobody loading model.
+
+When first user starts
+
+isInitializing=true 
+Now everyone else sees 
+Already loading.
+Wait.*/ 
+let initPromise = null; //model is downloading... as a promise
+
+/**
+ * Initialize the ML Transformer Model asynchronously.
+ */
+export async function initMLModel() {
+  if (sentimentPipeline) return sentimentPipeline;
+  if (isInitializing) return initPromise;
+
+  isInitializing = true;
+  initPromise = (async () => {
+    try {
+      console.log('[NLP Engine] Loading Transformer ML Model (Xenova/distilbert-base-uncased-finetuned-sst-2-english)...');
+      sentimentPipeline = await pipeline(
+        'sentiment-analysis',
+        'Xenova/distilbert-base-uncased-finetuned-sst-2-english'
+      );
+      console.log('[NLP Engine] Transformer ML Model loaded successfully!');
+      return sentimentPipeline;
+    } catch (err) {
+      console.warn('[NLP Engine] Could not load ML Transformer model, falling back to VADER:', err.message);
+      return null;
+    } finally {
+      isInitializing = false;
+    }
+  })();
+
+  return initPromise;
+}
+
+/**
+ * Perform Sentiment Analysis using Transformer ML Model.
+ * Returns a score normalized from 0.0 to 1.0.
+ */
+export async function analyzeNLPSentiment(text) {
+  if (!text || typeof text !== 'string' || text.trim().length === 0) return 0.5;
+
+  try {
+    const pipe = await initMLModel();
+    if (pipe) {
+      const output = await pipe(text);
+      if (output && output.length > 0) {
+        const { label, score } = output[0];
+        // DistilBERT output: POSITIVE or NEGATIVE with confidence score
+        let sentimentScore = 0.5;
+        if (label === 'POSITIVE') {
+          sentimentScore = score;
+        } else if (label === 'NEGATIVE') {
+          sentimentScore = 1.0 - score;
+        } else {
+          sentimentScore = score;
+        }
+        return Number(Math.max(0.05, Math.min(0.98, sentimentScore)).toFixed(2));
+      }
+    }
+  } catch (err) {
+    console.warn('[NLP Engine] ML Inference failed, using rule-based VADER fallback:', err.message);
+  }
+
+  // Fallback to Rule-based VADER
+  return analyzeNLPSentimentSync(text);
+}
 
 const VALENCE_LEXICON = {
   // Positive Lexicon & Intensity Scores
@@ -42,7 +125,7 @@ const BOOSTERS = {
   "barely": -0.25, "somewhat": -0.15, "hardly": -0.2
 };
 
-export function analyzeNLPSentiment(text) {
+export function analyzeNLPSentimentSync(text) {
   if (!text || typeof text !== 'string') return 0.5;
 
   const rawWords = text.replace(/[^a-zA-Z0-9\s!?-]/g, '').split(/\s+/).filter(Boolean);
@@ -56,7 +139,6 @@ export function analyzeNLPSentiment(text) {
     const rawWord = rawWords[i];
     const cleanWord = rawWord.toLowerCase();
 
-    // Clause boundary detection (e.g. "but", "however", "although")
     if (cleanWord === "but" || cleanWord === "however" || cleanWord === "although") {
       inButClause = true;
       continue;
@@ -65,13 +147,11 @@ export function analyzeNLPSentiment(text) {
     if (cleanWord in VALENCE_LEXICON) {
       let valence = VALENCE_LEXICON[cleanWord];
 
-      // Capitalization intensity check (e.g., "GREAT", "TERRIBLE")
       const isAllCaps = rawWord === rawWord.toUpperCase() && rawWord.length > 2;
       if (isAllCaps) {
         valence += valence > 0 ? 0.4 : -0.4;
       }
 
-      // Check preceding words for negations & booster modifiers (up to 2 words back)
       let isNegated = false;
       let boosterDelta = 0;
 
@@ -87,19 +167,16 @@ export function analyzeNLPSentiment(text) {
         }
       }
 
-      // Apply Booster multiplier
       if (valence > 0) {
         valence += boosterDelta;
       } else {
         valence -= boosterDelta;
       }
 
-      // Apply Negation inversion (VADER formula: negate and multiply by 0.74 scalar)
       if (isNegated) {
         valence = -0.74 * valence;
       }
 
-      // Apply Contrastive Conjunction weighting (0.5x before "but", 1.5x after "but")
       const clauseMultiplier = inButClause ? 1.5 : 0.75;
       valence *= clauseMultiplier;
 
@@ -108,21 +185,17 @@ export function analyzeNLPSentiment(text) {
     }
   }
 
-  // Punctuation Intensity Boost (! and ?)
   const exclamationCount = (text.match(/!/g) || []).length;
   if (exclamationCount > 0) {
     const boost = Math.min(exclamationCount * 0.15, 0.6);
     totalScore += totalScore >= 0 ? boost : -boost;
   }
 
-  // VADER Compound Score Normalization: S_norm = score / sqrt(score^2 + alpha)
   const alpha = 15;
   const compound = totalScore / Math.sqrt((totalScore * totalScore) + alpha);
-
-  // Normalize range from [-1.0, +1.0] to [0.0, 1.0] for UI compatibility
   const normalizedScore = (compound + 1.0) / 2.0;
 
   return Number(Math.max(0.05, Math.min(0.98, normalizedScore)).toFixed(2));
 }
 
-export default { analyzeNLPSentiment };
+export default { analyzeNLPSentiment, analyzeNLPSentimentSync, initMLModel };

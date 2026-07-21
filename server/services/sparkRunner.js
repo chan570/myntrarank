@@ -37,15 +37,15 @@ export async function runSparkAuditJob(products) {
   }
 
   // Fallback Engine Execution
-  const fallbackResults = products.map(p => {
-    const metrics = auditProductReviews(p.reviews || []);
+  const fallbackResults = await Promise.all(products.map(async p => {
+    const metrics = await auditProductReviews(p.reviews || []);
     return {
       id: p.id,
       ...p,
       auditedMetrics: metrics,
-      auditedBy: 'Node.js VADER NLP Audit Engine'
+      auditedBy: 'Node.js ML Transformer NLP Audit Engine'
     };
-  });
+  }));
 
   console.log(`✅ Batch Processing Engine completed! Audited ${fallbackResults.length} products.\n`);
   return fallbackResults;
