@@ -4,7 +4,7 @@
  * and falls back to Node.js VADER NLP audit engine if PySpark/Java is missing.
  */
 
-import { spawn } from 'child_process';
+import { spawn } from 'child_process';//Without spawn, Node cannot execute Python.
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -61,7 +61,7 @@ function checkPySparkInstalled() {
 
 function executePySparkScript(products) {
   return new Promise((resolve, reject) => {
-    const tmpDir = path.join(__dirname, '../scratch');
+    const tmpDir = path.join(__dirname, '../scratch'); //scratch file
     if (!fs.existsSync(tmpDir)) {
       fs.mkdirSync(tmpDir, { recursive: true });
     }

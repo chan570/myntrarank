@@ -1,7 +1,4 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
-import { mockDatabase } from './services/mockDatabase';
-import { offlinePipeline } from './services/offlinePipeline';
-import { queryEngine } from './services/queryEngine';
 import { apiClient } from './services/apiClient';
 import './index.css';
 
@@ -96,32 +93,33 @@ export function App() {
     }
   };
 
-  // Initialize product index on mount
+  const [searchResults, setSearchResults] = useState([]);
+
+  // Execute Pure Backend Search via Express REST API & Amazon OpenSearch
   useEffect(() => {
-    offlinePipeline.runBatchJob(mockDatabase.getAll());
-    setSearchIndexVersion(prev => prev + 1);
-  }, []);
+    let isMounted = true;
 
-  // Default Trust Scoring Weights
-  const weights = useMemo(() => ({
-    weightAuthenticity: 0.35,
-    weightSentiment: 0.20,
-    weightVerified: 0.15,
-    weightRichness: 0.10,
-    weightRecency: 0.10,
-    weightRating: 0.10
-  }), []);
-
-  // Execute Search Engine
-  const searchResult = useMemo(() => {
-    return queryEngine.searchAndScore(searchQuery, {
-      ...weights,
+    apiClient.executeQuery(searchQuery, {
+      auth: 0.35,
+      sent: 0.20,
+      ver: 0.15,
+      rich: 0.10,
+      rec: 0.10,
+      rate: 0.10,
       removeSuspicious,
       filterLowReviews,
       minRating: minRatingFilter,
       categoryFilter: activeCategory
+    }).then(data => {
+      if (isMounted && data && Array.isArray(data.results)) {
+        setSearchResults(data.results);
+      }
+    }).catch(err => {
+      console.error("Backend Search Error:", err);
     });
-  }, [searchIndexVersion, searchQuery, weights, removeSuspicious, filterLowReviews, minRatingFilter, activeCategory]);
+
+    return () => { isMounted = false; };
+  }, [searchQuery, removeSuspicious, filterLowReviews, minRatingFilter, activeCategory]);
 
   const checkIsFakeProduct = (product) => {
     if (!product) return false;
@@ -138,16 +136,14 @@ export function App() {
     );
   };
 
-  // Handle Sort & Filtering Controls
+  // Handle Sort Controls on Backend Search Results
   const finalSortedProducts = useMemo(() => {
-    let listCopy = [...searchResult.results];
+    let listCopy = [...searchResults];
 
-    // Guarantee filtering out products with fake reviews when removeSuspicious is checked
     if (removeSuspicious) {
       listCopy = listCopy.filter(product => !checkIsFakeProduct(product));
     }
 
-    // Guarantee filtering out products with low review count when filterLowReviews is checked
     if (filterLowReviews) {
       listCopy = listCopy.filter(product => {
         const totalReviews = product.totalReviewsCount ?? product.auditedMetrics?.totalReviewsCount ?? (product.reviews ? product.reviews.length : 0);
@@ -164,7 +160,7 @@ export function App() {
       listCopy.sort((a, b) => b.rawAvgRating - a.rawAvgRating);
     }
     return listCopy;
-  }, [searchResult, sortOption, removeSuspicious, filterLowReviews]);
+  }, [searchResults, sortOption, removeSuspicious, filterLowReviews]);
 
   const formatDate = (timestamp) => {
     const d = new Date(timestamp);

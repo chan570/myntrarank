@@ -15,7 +15,7 @@ export class OpenSearchEngine {
       node: OPENSEARCH_NODE,
       requestTimeout: 10000
     });
-    this.initPromise = null;
+    this.initPromise = null;//Make sure OpenSearch is running and the index exists before doing anything else.
   }
 
   // Ensure index & Painless script metric mapping exists in OpenSearch
@@ -72,7 +72,15 @@ export class OpenSearchEngine {
 
     return this.initPromise;
   }
+/*This file is basically a wrapper around Amazon OpenSearch.
 
+It tells OpenSearch
+
+create index
+insert product
+search product
+update product
+count products */
   // Index or update a document directly in OpenSearch cluster
   async upsertDocument(product) {
     if (!product || !product.id) return;
@@ -94,6 +102,7 @@ export class OpenSearchEngine {
       isSuspicious: product.isSuspicious,
       reviews: product.reviews || [],
       auditedMetrics: {
+        /*Search Ranking depends on these. */
         authenticityScore: metrics.authenticityScore ?? 1.0,
         sentimentScore: metrics.sentimentScore ?? 0.5,
         verifiedRatio: metrics.verifiedRatio ?? 0.5,
@@ -114,7 +123,25 @@ export class OpenSearchEngine {
       refresh: true
     });
   }
+/*Q1. Why do we need upsertDocument()?
 
+To synchronize MongoDB with OpenSearch. Whenever a product is created or updated, the corresponding search document must also be inserted or updated.
+
+Q2. Why not search directly from MongoDB?
+
+MongoDB is optimized for storage and transactions. OpenSearch is optimized for full-text search, ranking, filtering, and very fast retrieval.
+
+Q3. Why create a separate doc object?
+
+Because the search index only stores fields needed for searching and ranking. This avoids indexing unnecessary data.
+
+Q4. Why are auditedMetrics stored inside OpenSearch?
+
+Because ranking uses these values. Precomputing and storing them avoids recalculating trust metrics on every search request, making searches much faster.
+
+Q5. Why use refresh: true?
+
+To make newly indexed or updated documents immediately searchable. It improves freshness but can reduce indexing throughput, so production systems use it selectively. */
   // Bulk index documents directly into OpenSearch
   async bulkIndex(products) {
     if (!Array.isArray(products) || products.length === 0) return;
@@ -164,6 +191,17 @@ export class OpenSearchEngine {
     try {
       const res = await this.client.get({ index: INDEX_NAME, id });
       return res.body._source;
+      /*{
+   _index: "...",
+   _id: "prod-105",
+   _version: 5,
+
+   _source:{
+      title:"Nike Shoes",
+      price:2999,
+      ...
+   }
+} */
     } catch (err) {
       return null;
     }
@@ -176,7 +214,7 @@ export class OpenSearchEngine {
       const res = await this.client.search({
         index: INDEX_NAME,
         body: {
-          size: 10000,
+          size: 10000,/*OpenSearch returns only 10 results by default. */
           query: { match_all: {} }
         }
       });
@@ -194,8 +232,8 @@ export class OpenSearchEngine {
     return res.body.count;
   }
 
-  // Execute Search Query (Pure Amazon OpenSearch DSL + Painless Script Scoring)
-  async executeQuery(queryText = '', weights = {}) {
+  // Execute Search Query (Pure Amazon OpenSearch DSL + Painless Script Scoring + Filters)
+  async executeQuery(queryText = '', weights = {}, filters = {}) {
     const startTime = performance.now();
     await this.init();
 
@@ -206,21 +244,54 @@ export class OpenSearchEngine {
     const wRec = weights.rec !== undefined ? weights.rec : 0.10;
     const wRate = weights.rate !== undefined ? weights.rate : 0.10;
 
+    const {
+      removeSuspicious = false,
+      filterLowReviews = false,
+      minRating = 0,
+      categoryFilter = 'All'
+    } = filters;
+
     const queryTokens = queryText.toLowerCase().trim().split(/\s+/).filter(Boolean);
     
-    const baseQuery = queryTokens.length > 0 ? {
+    const baseMatch = queryTokens.length > 0 ? {
       multi_match: {
         query: queryText,
         fields: ['title^12', 'brand^8', 'tags^6', 'category^5', 'description^2']
       }
     } : { match_all: {} };
 
+    // Bool Filters
+    const mustFilters = [];
+
+    if (categoryFilter && categoryFilter !== 'All') {
+      mustFilters.push({ term: { category: categoryFilter } });
+    }
+
+    if (filterLowReviews) {
+      mustFilters.push({ range: { 'auditedMetrics.totalReviewsCount': { gte: 10 } } });
+    }
+
+    if (minRating > 0) {
+      mustFilters.push({ range: { 'auditedMetrics.genuineRating': { gte: minRating } } });
+    }
+
+    if (removeSuspicious) {
+      mustFilters.push({ term: { isSuspicious: false } });
+      mustFilters.push({ range: { 'auditedMetrics.authenticityScore': { gte: 0.60 } } });
+    }
+
+    const filteredQuery = mustFilters.length > 0 ? {
+      bool: {
+        must: [baseMatch, ...mustFilters]
+      }
+    } : baseMatch;
+
     // Native OpenSearch Painless Script Score Query
     const searchBody = {
       size: 500,
       query: {
         script_score: {
-          query: baseQuery,
+          query: filteredQuery,
           script: {
             source: `
               double auth = doc['auditedMetrics.authenticityScore'].value;
@@ -266,12 +337,13 @@ export class OpenSearchEngine {
     });
 
     const executionTimeMs = Number((performance.now() - startTime).toFixed(3));
+    //To calculate search latency.
     return {
       engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
       results,
       totalMatches: results.length,
       totalIndexed: response.body.hits.total.value || results.length,
-      executionTimeMs
+      executionTimeMs //this is search latency
     };
   }
 }

@@ -52,7 +52,7 @@ export async function auditProductReviews(reviews) {
   }
 
   const totalReviewsCount = reviews.length;
-  if (totalReviewsCount < 10) {
+  if (totalReviewsCount < 10) {// if insuff sample size cannot conclude fraud or genuine so just default values
     return {
       authenticityScore: 1.0,
       sentimentScore: 0.5,
@@ -67,7 +67,7 @@ export async function auditProductReviews(reviews) {
       auditedReviews: reviews
     };
   }
-
+  //if there is enough data
   // Pass 1: Deduplication via DJB2 Hashing
   const seenHashes = new Set();
   let duplicateCount = 0;
@@ -76,15 +76,15 @@ export async function auditProductReviews(reviews) {
   for (const r of reviews) {
     const textHash = hashString(r.text || '');
     if (textHash && seenHashes.has(textHash)) {
-      duplicateCount++;
+      duplicateCount++; 
     } else {
       if (textHash) seenHashes.add(textHash);
-      deduplicated.push(r);
+      deduplicated.push(r); //Stores only unique reviews.
     }
   }
 
   // Pass 2: Velocity Spike Anomaly Detection (Single-day density check)
-  const dateCounts = {};
+  const dateCounts = {};//Date -> Number of Reviews
   for (const r of deduplicated) {
     const dateKey = new Date(r.date).toISOString().split('T')[0];
     dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
@@ -94,7 +94,11 @@ export async function auditProductReviews(reviews) {
     if (dateCounts[k] > maxSingleDayCount) maxSingleDayCount = dateCounts[k];
   }
   const isVelocitySpike = maxSingleDayCount >= 5 && (maxSingleDayCount / totalReviewsCount) > 0.30;
+  /*There are two conditions:
+At least 5 reviews on one day
+More than 30% of all reviews came on that day */
   const validReviews = isVelocitySpike ? deduplicated.filter(r => new Date(r.date).toISOString().split('T')[0] !== Object.keys(dateCounts).find(k => dateCounts[k] === maxSingleDayCount)) : deduplicated;
+  //the code removes reviews from that suspicious day.Because those reviews are likely fake and should not influence trust calculations.
 
   // Pass 3: Rating Variance & Entropy Audit
   const ratings = validReviews.map(r => r.rating);
@@ -102,7 +106,10 @@ export async function auditProductReviews(reviews) {
   const variance = ratings.reduce((a, b) => a + Math.pow(b - meanRating, 2), 0) / (ratings.length || 1);
   const avgTextLen = validReviews.reduce((a, r) => a + (r.text ? r.text.length : 0), 0) / (validReviews.length || 1);
   const isLowVariance = variance < 0.05 && meanRating > 4.8 && avgTextLen < 40;
-
+/*Meaning:
+almost everyone gave 5 stars
+ratings hardly vary
+reviews are very short */
   // Authenticity Penalty Calculation
   let authPenalty = 0;
   if (duplicateCount > 0) authPenalty += Math.min(0.4, (duplicateCount / totalReviewsCount) * 0.8);

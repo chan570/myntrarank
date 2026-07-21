@@ -19,7 +19,14 @@ router.get('/search', async (req, res) => {
       rate: req.query.rate ? parseFloat(req.query.rate) : 0.10,
     };
 
-    const searchResponse = await openSearchService.executeQuery(query, weights);
+    const filters = {
+      removeSuspicious: req.query.removeSuspicious === 'true',
+      filterLowReviews: req.query.filterLowReviews === 'true',
+      minRating: req.query.minRating ? parseFloat(req.query.minRating) : 0,
+      categoryFilter: req.query.category || 'All'
+    };
+
+    const searchResponse = await openSearchService.executeQuery(query, weights, filters);
     res.json({
       status: 'success',
       cloudService: 'Amazon OpenSearch Service',
