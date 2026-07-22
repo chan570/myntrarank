@@ -36,14 +36,13 @@ export async function runSparkAuditJob(products) {
     console.log(`⚡ Executing Node.js VADER NLP Audit Engine (PySpark-Equivalent Execution)...`);
   }
 
-  // Fallback Engine Execution
   const fallbackResults = await Promise.all(products.map(async p => {
-    const metrics = await auditProductReviews(p.reviews || []);
+    const metrics = await auditProductReviews(p.reviews || [], true);
     return {
       id: p.id,
       ...p,
       auditedMetrics: metrics,
-      auditedBy: 'Node.js ML Transformer NLP Audit Engine'
+      auditedBy: 'Node.js VADER NLP Audit Engine'
     };
   }));
 

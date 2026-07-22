@@ -34,17 +34,25 @@ async function startServer() {
   console.log(`🚀 STARTING TRUSTRANK BACKEND MICROSERVICE GATEWAY`);
   console.log(`======================================================\n`);
 
-  const isConnected = await connectDB();
-  await seedDatabase(!isConnected);
-/*The server does not start listening until the database and seeding are complete.
-
-That prevents users from sending requests before the application is ready. */
-  app.listen(PORT, () => {
+  // Start listening on port immediately so that Render detects an active port binding without delay
+  app.listen(PORT, async () => {
     console.log(`\n🌐 Express REST API Server running live at: http://localhost:${PORT}`);
     console.log(`📡 Cloud API Endpoints Active:`);
     console.log(`   - Search API:  http://localhost:${PORT}/api/search?q=shirt`);
     console.log(`   - Stats API:   http://localhost:${PORT}/api/stats`);
     console.log(`======================================================\n`);
+
+    // Run connection and seeding asynchronously in the background
+    try {
+      const isConnected = await connectDB();
+      seedDatabase(!isConnected).then(() => {
+        console.log(`📦 Seeding and OpenSearch initialization completed!`);
+      }).catch(err => {
+        console.warn(`⚠️ Seeding failure caught in background: ${err.message}`);
+      });
+    } catch (err) {
+      console.warn(`⚠️ DB Boot failure caught in background: ${err.message}`);
+    }
   });
 }
 

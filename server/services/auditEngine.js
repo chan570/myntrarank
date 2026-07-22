@@ -4,7 +4,7 @@
  * Exponential Half-Life Time Decay (T_half = 180d), and Real ML Transformer NLP Sentiment.
  */
 
-import { analyzeNLPSentiment } from './nlpEngine.js';
+import { analyzeNLPSentiment, analyzeNLPSentimentSync } from './nlpEngine.js';
 
 // DJB2 Hash String Primitive
 export function hashString(str) {
@@ -34,7 +34,7 @@ export async function calculateSentiment(text) {
 }
 
 // Multi-Pass Review Auditing Routine (Async for ML inference)
-export async function auditProductReviews(reviews) {
+export async function auditProductReviews(reviews, useSyncSentiment = false) {
   if (!reviews || !Array.isArray(reviews) || reviews.length === 0) {
     return {
       authenticityScore: 1.0,
@@ -126,7 +126,7 @@ reviews are very short */
 
   for (const r of validReviews) {
     const decay = calculateTimeDecay(r.date);
-    const sent = await calculateSentiment(r.text);
+    const sent = useSyncSentiment ? analyzeNLPSentimentSync(r.text) : await calculateSentiment(r.text);
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 
