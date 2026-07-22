@@ -4,7 +4,7 @@
  * Fallbacks gracefully to in-memory mode if Express server is offline.
  */
 
-const API_BASE_URL = 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
 
 export const apiClient = {
   // Execute Search Query (Backend API)
