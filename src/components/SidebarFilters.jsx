@@ -1,5 +1,5 @@
 import React from 'react';
-
+//This component is the left sidebar of your application. Its only responsibility is to display filter options and notify the parent component whenever the user changes a filter.
 export const SidebarFilters = ({
   removeSuspicious,
   setRemoveSuspicious,

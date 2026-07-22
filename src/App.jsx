@@ -1,11 +1,23 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { apiClient } from './services/apiClient';
+import { offlinePipeline } from './services/offlinePipeline';
+import { queryEngine } from './services/queryEngine';
+import { mockDatabase } from './services/mockDatabase';
 import { Header } from './components/Header';
 import { SidebarFilters } from './components/SidebarFilters';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetail } from './components/ProductDetail';
 import './index.css';
+/*This file performs 8 major tasks:
 
+Maintains all application state.
+Calls the backend whenever the search/filter changes.
+Stores backend search results.
+Filters and sorts the products.
+Opens and closes the product detail page.
+Handles wishlist and shopping bag.
+Shows toast notifications.
+Decides which components should be rendered. */
 export function App() {
   // Application States
   const [searchQuery, setSearchQuery] = useState("");
@@ -73,6 +85,15 @@ export function App() {
     }
   };
 
+  // Initialize product index on mount for client-side search fallback
+  useEffect(() => {
+    try {
+      offlinePipeline.runBatchJob(mockDatabase.getAll());
+    } catch (e) {
+      console.error("Failed to initialize offline search index:", e);
+    }
+  }, []);
+
   // Execute Pure Backend Search via Express REST API & Amazon OpenSearch
   useEffect(() => {
     let isMounted = true;
@@ -88,10 +109,45 @@ export function App() {
       minRating: minRatingFilter,
       categoryFilter: activeCategory
     }).then(data => {
-      if (isMounted && data && Array.isArray(data.results)) {
-        setSearchResults(data.results);
+      if (isMounted) {
+        if (data && Array.isArray(data.results) && data.results.length > 0) {
+          setSearchResults(data.results);
+        } else {
+          // If backend returned nothing or empty, run in-memory client search engine as fallback
+          console.warn("Express API Offline/Empty: Falling back to in-memory search client...");
+          const clientData = queryEngine.searchAndScore(searchQuery, {
+            weightAuthenticity: 0.35,
+            weightSentiment: 0.20,
+            weightVerified: 0.15,
+            weightRichness: 0.10,
+            weightRecency: 0.10,
+            weightRating: 0.10,
+            removeSuspicious,
+            filterLowReviews,
+            minRating: minRatingFilter,
+            categoryFilter: activeCategory
+          });
+          setSearchResults(clientData.results || []);
+        }
       }
-    }).catch(err => console.error("Backend Search Error:", err));
+    }).catch(err => {
+      if (isMounted) {
+        console.warn("Express API Offline: Falling back to in-memory search client...");
+        const clientData = queryEngine.searchAndScore(searchQuery, {
+          weightAuthenticity: 0.35,
+          weightSentiment: 0.20,
+          weightVerified: 0.15,
+          weightRichness: 0.10,
+          weightRecency: 0.10,
+          weightRating: 0.10,
+          removeSuspicious,
+          filterLowReviews,
+          minRating: minRatingFilter,
+          categoryFilter: activeCategory
+        });
+        setSearchResults(clientData.results || []);
+      }
+    });
 
     return () => { isMounted = false; };
   }, [searchQuery, removeSuspicious, filterLowReviews, minRatingFilter, activeCategory]);

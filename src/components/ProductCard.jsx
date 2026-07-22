@@ -1,6 +1,6 @@
 import React from 'react';
 import { StarIcon } from './Icons';
-
+//Take one product object and display it beautifully on the screen.
 export const ProductCard = ({
   product,
   index,
