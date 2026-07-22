@@ -16,6 +16,7 @@ export class OpenSearchEngine {
       requestTimeout: 10000
     });
     this.initPromise = null;//Make sure OpenSearch is running and the index exists before doing anything else.
+    this.isOffline = false;
   }
 
   // Ensure index & Painless script metric mapping exists in OpenSearch
@@ -23,50 +24,56 @@ export class OpenSearchEngine {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      console.log(`[OpenSearch Engine] Connecting to Amazon OpenSearch / Elasticsearch cluster at ${OPENSEARCH_NODE}...`);
-      const pingRes = await this.client.ping();
-      if (!pingRes) {
-        throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
-      }
-      console.log(`[OpenSearch Engine] ✅ Connected to Amazon OpenSearch Cluster!`);
+      try {
+        console.log(`[OpenSearch Engine] Connecting to Amazon OpenSearch / Elasticsearch cluster at ${OPENSEARCH_NODE}...`);
+        const pingRes = await this.client.ping();
+        if (!pingRes) {
+          throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
+        }
+        console.log(`[OpenSearch Engine] ✅ Connected to Amazon OpenSearch Cluster!`);
 
-      const indexExists = await this.client.indices.exists({ index: INDEX_NAME });
-      if (!indexExists.body) {
-        await this.client.indices.create({
-          index: INDEX_NAME,
-          body: {
-            mappings: {
-              properties: {
-                id: { type: 'keyword' },
-                title: { type: 'text', analyzer: 'standard' },
-                brand: { type: 'keyword' },
-                description: { type: 'text' },
-                category: { type: 'keyword' },
-                tags: { type: 'keyword' },
-                price: { type: 'float' },
-                originalPrice: { type: 'float' },
-                discountPercent: { type: 'float' },
-                anomalyType: { type: 'keyword' },
-                isSuspicious: { type: 'boolean' },
-                auditedMetrics: {
-                  properties: {
-                    authenticityScore: { type: 'double' },
-                    sentimentScore: { type: 'double' },
-                    verifiedRatio: { type: 'double' },
-                    richnessScore: { type: 'double' },
-                    recencyScore: { type: 'double' },
-                    ratingScore: { type: 'double' },
-                    genuineRating: { type: 'double' },
-                    validReviewsCount: { type: 'integer' },
-                    totalReviewsCount: { type: 'integer' },
-                    isLowReviewCount: { type: 'boolean' }
+        const indexExists = await this.client.indices.exists({ index: INDEX_NAME });
+        if (!indexExists.body) {
+          await this.client.indices.create({
+            index: INDEX_NAME,
+            body: {
+              mappings: {
+                properties: {
+                  id: { type: 'keyword' },
+                  title: { type: 'text', analyzer: 'standard' },
+                  brand: { type: 'keyword' },
+                  description: { type: 'text' },
+                  category: { type: 'keyword' },
+                  tags: { type: 'keyword' },
+                  price: { type: 'float' },
+                  originalPrice: { type: 'float' },
+                  discountPercent: { type: 'float' },
+                  anomalyType: { type: 'keyword' },
+                  isSuspicious: { type: 'boolean' },
+                  auditedMetrics: {
+                    properties: {
+                      authenticityScore: { type: 'double' },
+                      sentimentScore: { type: 'double' },
+                      verifiedRatio: { type: 'double' },
+                      richnessScore: { type: 'double' },
+                      recencyScore: { type: 'double' },
+                      ratingScore: { type: 'double' },
+                      genuineRating: { type: 'double' },
+                      validReviewsCount: { type: 'integer' },
+                      totalReviewsCount: { type: 'integer' },
+                      isLowReviewCount: { type: 'boolean' }
+                    }
                   }
                 }
               }
             }
-          }
-        });
-        console.log(`[OpenSearch Engine] Created index '${INDEX_NAME}' with custom metric mapping.`);
+          });
+          console.log(`[OpenSearch Engine] Created index '${INDEX_NAME}' with custom metric mapping.`);
+        }
+      } catch (err) {
+        console.warn(`[OpenSearch Engine] ⚠️ Primary Connection Failed: ${err.message}`);
+        console.log(`[OpenSearch Engine] ⚡ Activating In-Memory OpenSearch Engine Fallback.`);
+        this.isOffline = true;
       }
     })();
 
@@ -85,6 +92,7 @@ count products */
   async upsertDocument(product) {
     if (!product || !product.id) return;
     await this.init();
+    if (this.isOffline) return;
 
     const metrics = product.auditedMetrics || {};
     const doc = {
@@ -146,6 +154,7 @@ To make newly indexed or updated documents immediately searchable. It improves f
   async bulkIndex(products) {
     if (!Array.isArray(products) || products.length === 0) return;
     await this.init();
+    if (this.isOffline) return;
 
     const body = products.flatMap(p => {
       const metrics = p.auditedMetrics || {};
@@ -250,6 +259,83 @@ To make newly indexed or updated documents immediately searchable. It improves f
       minRating = 0,
       categoryFilter = 'All'
     } = filters;
+
+    if (this.isOffline) {
+      try {
+        const { Product } = await import('../models/Product.js');
+        const dbProducts = await Product.find().lean();
+        
+        let list = dbProducts;
+        if (categoryFilter && categoryFilter !== 'All') {
+          list = list.filter(p => p.category === categoryFilter);
+        }
+
+        const query = queryText.toLowerCase().trim();
+        if (query) {
+          list = list.filter(p => 
+            p.title.toLowerCase().includes(query) ||
+            p.brand.toLowerCase().includes(query) ||
+            p.category.toLowerCase().includes(query) ||
+            (p.tags && p.tags.some(t => t.toLowerCase().includes(query)))
+          );
+        }
+
+        if (filterLowReviews) {
+          list = list.filter(p => {
+            const totalReviews = p.auditedMetrics?.totalReviewsCount ?? (p.reviews ? p.reviews.length : 0);
+            return totalReviews >= 10 && p.anomalyType !== "low_review_count";
+          });
+        }
+        if (minRating > 0) {
+          list = list.filter(p => (p.auditedMetrics?.genuineRating ?? 0) >= minRating);
+        }
+        if (removeSuspicious) {
+          list = list.filter(p => {
+            const authScore = p.auditedMetrics?.authenticityScore ?? 1.0;
+            const isFake = p.isSuspicious || authScore < 0.60 || (p.anomalyType && p.anomalyType !== 'low_review_count');
+            return !isFake;
+          });
+        }
+
+        const results = list.map(p => {
+          const m = p.auditedMetrics || {};
+          const authScore = m.authenticityScore ?? 1.0;
+          const isFake = p.isSuspicious || authScore < 0.60 || (p.anomalyType && p.anomalyType !== 'low_review_count');
+          const trustScore = (wAuth * authScore) + 
+                             (wSent * (m.sentimentScore ?? 0.5)) + 
+                             (wVer * (m.verifiedRatio ?? 0.8)) + 
+                             (wRich * (m.richnessScore ?? 0.5)) + 
+                             (wRec * (m.recencyScore ?? 0.5)) + 
+                             (wRate * (m.ratingScore ?? 0.8));
+
+          return {
+            ...p,
+            id: p.id,
+            authenticityScore: authScore,
+            rawAvgRating: m.genuineRating ?? 4.0,
+            totalReviewsCount: m.totalReviewsCount ?? (p.reviews ? p.reviews.length : 0),
+            isFlaggedAsFake: isFake,
+            isSuspicious: isFake,
+            relevanceScore: 1.0,
+            compositeTrustScore: Number(authScore.toFixed(3)),
+            finalRankScore: trustScore
+          };
+        });
+
+        results.sort((a, b) => b.finalRankScore - a.finalRankScore);
+
+        return {
+          engine: 'In-Memory MongoDB Search Fallback (OpenSearch Offline)',
+          results,
+          totalMatches: results.length,
+          totalIndexed: dbProducts.length,
+          executionTimeMs: Number((performance.now() - startTime).toFixed(3))
+        };
+      } catch (err) {
+        console.error("MongoDB Search Fallback Error:", err);
+        return { results: [], totalMatches: 0, executionTimeMs: 0 };
+      }
+    }
 
     const queryTokens = queryText.toLowerCase().trim().split(/\s+/).filter(Boolean);
     
