@@ -1,10 +1,12 @@
 /**
- * TRUSTRANK PURE AMAZON OPENSEARCH ENGINE
- * Official @opensearch-project/opensearch SDK integration.
- * Performs real OpenSearch indexing, Painless script_score queries, and document updates.
+ * TRUSTRANK AMAZON OPENSEARCH SERVICE
+ * Integration with Amazon OpenSearch / Elasticsearch REST DSL.
+ * Implements real-time indexing, autocomplete prefix matching, Painless script ranking,
+ * and standard in-memory search fallback when OpenSearch is offline.
  */
 
 import { Client } from '@opensearch-project/opensearch';
+import { TRUST_WEIGHTS, RANKING_WEIGHTS } from '../constants/weights.js';
 
 const INDEX_NAME = 'myntrarank_products';
 const OPENSEARCH_NODE = process.env.OPENSEARCH_NODE || 'http://localhost:9200';
@@ -15,11 +17,11 @@ export class OpenSearchEngine {
       node: OPENSEARCH_NODE,
       requestTimeout: 10000
     });
-    this.initPromise = null;//Make sure OpenSearch is running and the index exists before doing anything else.
+    this.initPromise = null;
     this.isOffline = false;
   }
 
-  // Ensure index & Painless script metric mapping exists in OpenSearch
+  // Verify and initialize index mapping
   async init() {
     if (this.initPromise) return this.initPromise;
 
@@ -30,7 +32,7 @@ export class OpenSearchEngine {
         if (!pingRes) {
           throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
         }
-        console.log(`[OpenSearch Engine] ✅ Connected to Amazon OpenSearch Cluster!`);
+        console.log(`[OpenSearch Engine] Connected to OpenSearch Cluster successfully.`);
 
         const indexExists = await this.client.indices.exists({ index: INDEX_NAME });
         if (!indexExists.body) {
@@ -71,24 +73,77 @@ export class OpenSearchEngine {
           console.log(`[OpenSearch Engine] Created index '${INDEX_NAME}' with custom metric mapping.`);
         }
       } catch (err) {
-        console.warn(`[OpenSearch Engine] ⚠️ Primary Connection Failed: ${err.message}`);
-        console.log(`[OpenSearch Engine] ⚡ Activating In-Memory OpenSearch Engine Fallback.`);
+        console.warn(`[OpenSearch Engine] Primary OpenSearch connection failed: ${err.message}`);
+        console.log(`[OpenSearch Engine] Activating local MongoDB/In-Memory fallback search engine.`);
         this.isOffline = true;
       }
     })();
 
     return this.initPromise;
   }
-/*This file is basically a wrapper around Amazon OpenSearch.
 
-It tells OpenSearch
+  // Get single document by ID
+  async getDocument(id) {
+    await this.init();
+    if (this.isOffline) {
+      try {
+        const { Product } = await import('../models/Product.js');
+        return Product.findOne({ id }).lean();
+      } catch (err) {
+        return null;
+      }
+    }
+    try {
+      const res = await this.client.get({ index: INDEX_NAME, id });
+      return res.body._source;
+    } catch (err) {
+      return null;
+    }
+  }
 
-create index
-insert product
-search product
-update product
-count products */
-  // Index or update a document directly in OpenSearch cluster
+  // Get all documents
+  async getAllDocuments() {
+    await this.init();
+    if (this.isOffline) {
+      try {
+        const { Product } = await import('../models/Product.js');
+        return Product.find().lean();
+      } catch (err) {
+        return [];
+      }
+    }
+    try {
+      const res = await this.client.search({
+        index: INDEX_NAME,
+        body: { size: 1000, query: { match_all: {} } }
+      });
+      const hits = res.body.hits.hits || [];
+      return hits.map(h => h._source);
+    } catch (err) {
+      return [];
+    }
+  }
+
+  // Get total document count
+  async getDocumentCount() {
+    await this.init();
+    if (this.isOffline) {
+      try {
+        const { Product } = await import('../models/Product.js');
+        return Product.countDocuments();
+      } catch (err) {
+        return 0;
+      }
+    }
+    try {
+      const res = await this.client.count({ index: INDEX_NAME });
+      return res.body.count;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  // Insert or update a single document
   async upsertDocument(product) {
     if (!product || !product.id) return;
     await this.init();
@@ -110,7 +165,6 @@ count products */
       isSuspicious: product.isSuspicious,
       reviews: product.reviews || [],
       auditedMetrics: {
-        /*Search Ranking depends on these. */
         authenticityScore: metrics.authenticityScore ?? 1.0,
         sentimentScore: metrics.sentimentScore ?? 0.5,
         verifiedRatio: metrics.verifiedRatio ?? 0.5,
@@ -131,26 +185,8 @@ count products */
       refresh: true
     });
   }
-/*Q1. Why do we need upsertDocument()?
 
-To synchronize MongoDB with OpenSearch. Whenever a product is created or updated, the corresponding search document must also be inserted or updated.
-
-Q2. Why not search directly from MongoDB?
-
-MongoDB is optimized for storage and transactions. OpenSearch is optimized for full-text search, ranking, filtering, and very fast retrieval.
-
-Q3. Why create a separate doc object?
-
-Because the search index only stores fields needed for searching and ranking. This avoids indexing unnecessary data.
-
-Q4. Why are auditedMetrics stored inside OpenSearch?
-
-Because ranking uses these values. Precomputing and storing them avoids recalculating trust metrics on every search request, making searches much faster.
-
-Q5. Why use refresh: true?
-
-To make newly indexed or updated documents immediately searchable. It improves freshness but can reduce indexing throughput, so production systems use it selectively. */
-  // Bulk index documents directly into OpenSearch
+  // Bulk index documents
   async bulkIndex(products) {
     if (!Array.isArray(products) || products.length === 0) return;
     await this.init();
@@ -190,68 +226,71 @@ To make newly indexed or updated documents immediately searchable. It improves f
       ];
     });
 
-    await this.client.bulk({ refresh: true, body });
-    console.log(`[OpenSearch Engine] Bulk indexed ${products.length} documents into OpenSearch cluster.`);
+    await this.client.bulk({ body, refresh: true });
   }
 
-  // Get single document from OpenSearch
-  async getDocument(id) {
+  // Autocomplete Query Engine
+  async autocomplete(queryText = '') {
     await this.init();
-    try {
-      const res = await this.client.get({ index: INDEX_NAME, id });
-      return res.body._source;
-      /*{
-   _index: "...",
-   _id: "prod-105",
-   _version: 5,
+    const query = queryText.trim().toLowerCase();
+    if (!query) return [];
 
-   _source:{
-      title:"Nike Shoes",
-      price:2999,
-      ...
-   }
-} */
-    } catch (err) {
-      return null;
+    if (this.isOffline) {
+      try {
+        const { Product } = await import('../models/Product.js');
+        const matches = await Product.find({
+          $or: [
+            { title: { $regex: '^' + query, $options: 'i' } },
+            { brand: { $regex: '^' + query, $options: 'i' } }
+          ]
+        }).limit(8).lean();
+        return matches.map(p => ({
+          id: p.id,
+          title: p.title,
+          brand: p.brand,
+          category: p.category
+        }));
+      } catch (err) {
+        return [];
+      }
     }
-  }
 
-  // Get all documents from OpenSearch
-  async getAllDocuments() {
-    await this.init();
     try {
-      const res = await this.client.search({
+      const response = await this.client.search({
         index: INDEX_NAME,
         body: {
-          size: 10000,/*OpenSearch returns only 10 results by default. */
-          query: { match_all: {} }
+          size: 8,
+          query: {
+            match_phrase_prefix: {
+              title: query
+            }
+          }
         }
       });
-      const hits = res.body.hits.hits || [];
-      return hits.map(h => h._source);
+      const hits = response.body.hits.hits || [];
+      return hits.map(h => ({
+        id: h._source.id,
+        title: h._source.title,
+        brand: h._source.brand,
+        category: h._source.category
+      }));
     } catch (err) {
       return [];
     }
   }
 
-  // Total document count in OpenSearch
-  async getDocumentCount() {
-    await this.init();
-    const res = await this.client.count({ index: INDEX_NAME });
-    return res.body.count;
-  }
-
-  // Execute Search Query (Pure Amazon OpenSearch DSL + Painless Script Scoring + Filters)
+  // Execute Search Query (DSL + Painless Script Scoring + Explanation)
   async executeQuery(queryText = '', weights = {}, filters = {}) {
     const startTime = performance.now();
     await this.init();
 
-    const wAuth = weights.auth !== undefined ? weights.auth : 0.35;
-    const wSent = weights.sent !== undefined ? weights.sent : 0.20;
-    const wVer = weights.ver !== undefined ? weights.ver : 0.15;
-    const wRich = weights.rich !== undefined ? weights.rich : 0.10;
-    const wRec = weights.rec !== undefined ? weights.rec : 0.10;
-    const wRate = weights.rate !== undefined ? weights.rate : 0.10;
+    // Configure TrustRank weights from input params or defaults
+    const wAuth = weights.auth !== undefined ? weights.auth : TRUST_WEIGHTS.auth;
+    const wSent = weights.sent !== undefined ? weights.sent : TRUST_WEIGHTS.sentiment;
+    const wVer = weights.ver !== undefined ? weights.ver : TRUST_WEIGHTS.verified;
+    const wRich = weights.rich !== undefined ? weights.rich : TRUST_WEIGHTS.rich;
+    const wRec = weights.rec !== undefined ? weights.rec : TRUST_WEIGHTS.rec;
+    const wRate = weights.rate !== undefined ? weights.rate : TRUST_WEIGHTS.rating;
 
     const {
       removeSuspicious = false,
@@ -301,12 +340,32 @@ To make newly indexed or updated documents immediately searchable. It improves f
           const m = p.auditedMetrics || {};
           const authScore = m.authenticityScore ?? 1.0;
           const isFake = p.isSuspicious || authScore < 0.60 || (p.anomalyType && p.anomalyType !== 'low_review_count');
+          
+          // TrustRank Score
           const trustScore = (wAuth * authScore) + 
                              (wSent * (m.sentimentScore ?? 0.5)) + 
                              (wVer * (m.verifiedRatio ?? 0.8)) + 
                              (wRich * (m.richnessScore ?? 0.5)) + 
                              (wRec * (m.recencyScore ?? 0.5)) + 
                              (wRate * (m.ratingScore ?? 0.8));
+
+          // Mock search relevance weight (offline mode defaults query match score to 1.0)
+          const searchRelevance = queryText ? 1.0 : 0.5;
+
+          // Composite SDE Ranking Score
+          const finalScore = (RANKING_WEIGHTS.relevance * searchRelevance) +
+                             (RANKING_WEIGHTS.trustScore * trustScore) +
+                             (RANKING_WEIGHTS.rating * (m.ratingScore ?? 0.8)) +
+                             (RANKING_WEIGHTS.recency * (m.recencyScore ?? 0.5));
+
+          const rankingExplanation = {
+            relevanceScore: Number(searchRelevance.toFixed(2)),
+            trustScore: Number(trustScore.toFixed(3)),
+            ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
+            recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
+            weights: RANKING_WEIGHTS,
+            text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${searchRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
+          };
 
           return {
             ...p,
@@ -316,9 +375,10 @@ To make newly indexed or updated documents immediately searchable. It improves f
             totalReviewsCount: m.totalReviewsCount ?? (p.reviews ? p.reviews.length : 0),
             isFlaggedAsFake: isFake,
             isSuspicious: isFake,
-            relevanceScore: 1.0,
+            relevanceScore: searchRelevance,
             compositeTrustScore: Number(authScore.toFixed(3)),
-            finalRankScore: trustScore
+            finalRankScore: Number(finalScore.toFixed(3)),
+            rankingExplanation
           };
         });
 
@@ -337,8 +397,8 @@ To make newly indexed or updated documents immediately searchable. It improves f
       }
     }
 
+    // DSL Search Engine Path
     const queryTokens = queryText.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    
     const baseMatch = queryTokens.length > 0 ? {
       multi_match: {
         query: queryText,
@@ -346,21 +406,16 @@ To make newly indexed or updated documents immediately searchable. It improves f
       }
     } : { match_all: {} };
 
-    // Bool Filters
     const mustFilters = [];
-
     if (categoryFilter && categoryFilter !== 'All') {
       mustFilters.push({ term: { category: categoryFilter } });
     }
-
     if (filterLowReviews) {
       mustFilters.push({ range: { 'auditedMetrics.totalReviewsCount': { gte: 10 } } });
     }
-
     if (minRating > 0) {
       mustFilters.push({ range: { 'auditedMetrics.genuineRating': { gte: minRating } } });
     }
-
     if (removeSuspicious) {
       mustFilters.push({ term: { isSuspicious: false } });
       mustFilters.push({ range: { 'auditedMetrics.authenticityScore': { gte: 0.60 } } });
@@ -372,7 +427,7 @@ To make newly indexed or updated documents immediately searchable. It improves f
       }
     } : baseMatch;
 
-    // Native OpenSearch Painless Script Score Query
+    // Advanced Painless Script Score using SDE weights & search score
     const searchBody = {
       size: 500,
       query: {
@@ -387,50 +442,85 @@ To make newly indexed or updated documents immediately searchable. It improves f
               double rec = doc['auditedMetrics.recencyScore'].value;
               double rate = doc['auditedMetrics.ratingScore'].value;
               
-              double trustScore = (params.wAuth * auth) + (params.wSent * sent) + (params.wVer * ver) + (params.wRich * rich) + (params.wRec * rec) + (params.wRate * rate);
-              return _score * trustScore;
+              double trust = (params.wAuth * auth) + (params.wSent * sent) + (params.wVer * ver) + (params.wRich * rich) + (params.wRec * rec) + (params.wRate * rate);
+              
+              // Normalize score base
+              double relevance = _score / 10.0;
+              if (relevance > 1.0) relevance = 1.0;
+              
+              // SDE Composite Ranking Score
+              return (params.rRel * relevance) + (params.rTr * trust) + (params.rRate * rate) + (params.rRec * rec);
             `,
-            params: { wAuth, wSent, wVer, wRich, wRec, wRate }
+            params: { 
+              wAuth, wSent, wVer, wRich, wRec, wRate,
+              rRel: RANKING_WEIGHTS.relevance,
+              rTr: RANKING_WEIGHTS.trustScore,
+              rRate: RANKING_WEIGHTS.rating,
+              rRec: RANKING_WEIGHTS.recency
+            }
           }
         }
       }
     };
 
-    const response = await this.client.search({
-      index: INDEX_NAME,
-      body: searchBody
-    });
+    try {
+      const response = await this.client.search({
+        index: INDEX_NAME,
+        body: searchBody
+      });
 
-    const hits = response.body.hits.hits || [];
-    const results = hits.map(hit => {
-      const doc = hit._source;
-      const score = hit._score || 1.0;
-      const m = doc.auditedMetrics || {};
-      const authScore = m.authenticityScore ?? 1.0;
-      const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
+      const hits = response.body.hits.hits || [];
+      const results = hits.map(hit => {
+        const doc = hit._source;
+        const finalScore = hit._score || 1.0;
+        const m = doc.auditedMetrics || {};
+        const authScore = m.authenticityScore ?? 1.0;
+        const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
+
+        const trustScore = (wAuth * authScore) + 
+                           (wSent * (m.sentimentScore ?? 0.5)) + 
+                           (wVer * (m.verifiedRatio ?? 0.8)) + 
+                           (wRich * (m.richnessScore ?? 0.5)) + 
+                           (wRec * (m.recencyScore ?? 0.5)) + 
+                           (wRate * (m.ratingScore ?? 0.8));
+
+        const queryRelevance = Math.min(1.0, (finalScore - (RANKING_WEIGHTS.trustScore * trustScore)) / RANKING_WEIGHTS.relevance);
+
+        const rankingExplanation = {
+          relevanceScore: Number(queryRelevance.toFixed(2)),
+          trustScore: Number(trustScore.toFixed(3)),
+          ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
+          recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
+          weights: RANKING_WEIGHTS,
+          text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${queryRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
+        };
+
+        return {
+          ...doc,
+          authenticityScore: authScore,
+          rawAvgRating: m.genuineRating ?? 4.0,
+          totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
+          isFlaggedAsFake: isFake,
+          isSuspicious: isFake,
+          relevanceScore: Number(queryRelevance.toFixed(2)),
+          compositeTrustScore: Number(authScore.toFixed(3)),
+          finalRankScore: Number(finalScore.toFixed(3)),
+          rankingExplanation
+        };
+      });
 
       return {
-        ...doc,
-        authenticityScore: authScore,
-        rawAvgRating: m.genuineRating ?? 4.0,
-        totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
-        isFlaggedAsFake: isFake,
-        isSuspicious: isFake,
-        relevanceScore: Number(score.toFixed(2)),
-        compositeTrustScore: Number(authScore.toFixed(3)),
-        finalRankScore: Number(score.toFixed(3))
+        engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
+        results,
+        totalMatches: results.length,
+        totalIndexed: response.body.hits.total.value || results.length,
+        executionTimeMs: Number((performance.now() - startTime).toFixed(3))
       };
-    });
-
-    const executionTimeMs = Number((performance.now() - startTime).toFixed(3));
-    //To calculate search latency.
-    return {
-      engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
-      results,
-      totalMatches: results.length,
-      totalIndexed: response.body.hits.total.value || results.length,
-      executionTimeMs //this is search latency
-    };
+    } catch (err) {
+      console.error("OpenSearch executeQuery error, running MongoDB fallback:", err);
+      this.isOffline = true;
+      return this.executeQuery(queryText, weights, filters);
+    }
   }
 }
 

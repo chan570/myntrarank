@@ -1,12 +1,14 @@
 /**
- * TRUSTRANK AUDIT ENGINE (Simulated Apache Spark Batch Worker)
- * Implements DJB2 Hashing, Date Density Outlier Detection, Variance Audit, 
- * Exponential Half-Life Time Decay (T_half = 180d), and Real ML Transformer NLP Sentiment.
+ * TRUSTRANK AUDIT & SPAM DETECTION ENGINE
+ * Enterprise review verification pipeline. Performs cryptographic hash-based
+ * deduplication, vocabulary diversity analysis (Type-Token Ratio), velocity
+ * spike detection, rating anomaly audits, and configures spam scores per review.
  */
 
 import { analyzeNLPSentiment, analyzeNLPSentimentSync } from './nlpEngine.js';
+import { TRUST_WEIGHTS, TIME_DECAY_HALF_LIFE_DAYS } from '../constants/weights.js';
 
-// DJB2 Hash String Primitive
+// DJB2 Hash String Primitive for fast duplicate checks
 export function hashString(str) {
   if (!str || typeof str !== 'string') return '0';
   const cleaned = str.toLowerCase().replace(/[^a-z0-9]/g, '');
@@ -19,7 +21,7 @@ export function hashString(str) {
 }
 
 // Exponential Half-Life Time Decay Scorer
-export function calculateTimeDecay(reviewDate, halfLifeDays = 180) {
+export function calculateTimeDecay(reviewDate, halfLifeDays = TIME_DECAY_HALF_LIFE_DAYS) {
   const now = Date.now();
   const dateMs = typeof reviewDate === 'number' ? reviewDate : new Date(reviewDate).getTime();
   const diffDays = Math.max(0, (now - dateMs) / (1000 * 60 * 60 * 24));
@@ -28,12 +30,106 @@ export function calculateTimeDecay(reviewDate, halfLifeDays = 180) {
   return Math.max(0.20, weight);
 }
 
-// ML Transformer NLP Sentiment Analysis
-export async function calculateSentiment(text) {
-  return await analyzeNLPSentiment(text);
+// Calculate Vocabulary Diversity (Type-Token Ratio)
+export function calculateTypeTokenRatio(text) {
+  if (!text || typeof text !== 'string') return 1.0;
+  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1.0;
+  const uniqueWords = new Set(words);
+  return Number((uniqueWords.size / words.length).toFixed(3));
 }
 
-// Multi-Pass Review Auditing Routine (Async for ML inference)
+// Count sequential repeated words (e.g. "very very very")
+export function countRepeatedWords(text) {
+  if (!text || typeof text !== 'string') return 0;
+  const words = text.toLowerCase().replace(/[^a-z0-9\s]/g, '').split(/\s+/).filter(Boolean);
+  let repeats = 0;
+  for (let i = 0; i < words.length - 1; i++) {
+    if (words[i] === words[i + 1]) {
+      repeats++;
+    }
+  }
+  return repeats;
+}
+
+const SPAM_KEYWORDS = [
+  "best product ever", "must buy", "amazing fabric", "five stars",
+  "free product", "discount code", "click here", "buy now",
+  "sponsored review", "work from home", "make money"
+];
+
+// Audit single review and return spam statistics
+export function auditSingleReview(review, allReviews, velocitySpikeDates) {
+  const text = review.text || '';
+  const reasons = [];
+  let spamPoints = 0.0;
+
+  // 1. Duplicate Text Detection
+  const textHash = hashString(text);
+  const duplicates = allReviews.filter(r => r.id !== review.id && hashString(r.text) === textHash);
+  if (duplicates.length > 0) {
+    reasons.push('duplicate_text');
+    spamPoints += 0.50;
+  }
+
+  // 2. Vocabulary Diversity Check (TTR)
+  const ttr = calculateTypeTokenRatio(text);
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  if (wordCount > 6 && ttr < 0.65) {
+    reasons.push('low_vocabulary_diversity');
+    spamPoints += 0.25;
+  }
+
+  // 3. Repeated Words Check
+  const repeatedWords = countRepeatedWords(text);
+  if (repeatedWords > 2) {
+    reasons.push('repeated_words');
+    spamPoints += 0.20;
+  }
+
+  // 4. Too Short Check
+  if (wordCount > 0 && wordCount < 5) {
+    reasons.push('very_short_review');
+    spamPoints += 0.15;
+  }
+
+  // 5. Spam Keywords Matching
+  const cleanText = text.toLowerCase();
+  const matchedKeywords = SPAM_KEYWORDS.filter(kw => cleanText.includes(kw));
+  if (matchedKeywords.length > 0) {
+    reasons.push('spam_keywords_detected');
+    spamPoints += 0.30;
+  }
+
+  // 6. Review Velocity Spike Check
+  const dateKey = new Date(review.date).toISOString().split('T')[0];
+  if (velocitySpikeDates.has(dateKey)) {
+    reasons.push('velocity_spike_anomaly');
+    spamPoints += 0.25;
+  }
+
+  // 7. Rating Anomaly (Verified purchase status combined with 5-star rating)
+  if (review.rating === 5 && !review.verified) {
+    reasons.push('unverified_5_star');
+    spamPoints += 0.10;
+  }
+
+  const spamScore = Number(Math.max(0.0, Math.min(1.0, spamPoints)).toFixed(3));
+  
+  // Confidence calculation based on number of trigger reasons
+  let confidence = 0.50;
+  if (reasons.length > 0) {
+    confidence = Math.min(0.98, 0.50 + (reasons.length * 0.15));
+  }
+
+  return {
+    spamScore,
+    reasons,
+    confidence: Number(confidence.toFixed(3))
+  };
+}
+
+// Multi-Pass Review Auditing Routine
 export async function auditProductReviews(reviews, useSyncSentiment = false) {
   if (!reviews || !Array.isArray(reviews) || reviews.length === 0) {
     return {
@@ -52,72 +148,40 @@ export async function auditProductReviews(reviews, useSyncSentiment = false) {
   }
 
   const totalReviewsCount = reviews.length;
-  if (totalReviewsCount < 10) {// if insuff sample size cannot conclude fraud or genuine so just default values
-    return {
-      authenticityScore: 1.0,
-      sentimentScore: 0.5,
-      verifiedRatio: reviews.filter(r => r.verified).length / totalReviewsCount,
-      richnessScore: 0.5,
-      recencyScore: 0.5,
-      ratingScore: reviews.reduce((a, r) => a + r.rating, 0) / (totalReviewsCount * 5),
-      genuineRating: Number((reviews.reduce((a, r) => a + r.rating, 0) / totalReviewsCount).toFixed(1)),
-      validReviewsCount: totalReviewsCount,
-      totalReviewsCount,
-      isLowReviewCount: true,
-      auditedReviews: reviews
-    };
-  }
-  //if there is enough data
-  // Pass 1: Deduplication via DJB2 Hashing
-  const seenHashes = new Set();
-  let duplicateCount = 0;
-  const deduplicated = [];
 
+  // Pass 1: Pre-calculate velocity spikes dates
+  const dateCounts = {};
   for (const r of reviews) {
-    const textHash = hashString(r.text || '');
-    if (textHash && seenHashes.has(textHash)) {
-      duplicateCount++; 
-    } else {
-      if (textHash) seenHashes.add(textHash);
-      deduplicated.push(r); //Stores only unique reviews.
-    }
-  }
-
-  // Pass 2: Velocity Spike Anomaly Detection (Single-day density check)
-  const dateCounts = {};//Date -> Number of Reviews
-  for (const r of deduplicated) {
     const dateKey = new Date(r.date).toISOString().split('T')[0];
     dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
   }
-  let maxSingleDayCount = 0;
+  const velocitySpikeDates = new Set();
   for (const k in dateCounts) {
-    if (dateCounts[k] > maxSingleDayCount) maxSingleDayCount = dateCounts[k];
+    // Flag dates where there are at least 5 reviews and represents > 30% of total reviews
+    if (dateCounts[k] >= 5 && (dateCounts[k] / totalReviewsCount) > 0.30) {
+      velocitySpikeDates.add(k);
+    }
   }
-  const isVelocitySpike = maxSingleDayCount >= 5 && (maxSingleDayCount / totalReviewsCount) > 0.30;
-  /*There are two conditions:
-At least 5 reviews on one day
-More than 30% of all reviews came on that day */
-  const validReviews = isVelocitySpike ? deduplicated.filter(r => new Date(r.date).toISOString().split('T')[0] !== Object.keys(dateCounts).find(k => dateCounts[k] === maxSingleDayCount)) : deduplicated;
-  //the code removes reviews from that suspicious day.Because those reviews are likely fake and should not influence trust calculations.
 
-  // Pass 3: Rating Variance & Entropy Audit
-  const ratings = validReviews.map(r => r.rating);
-  const meanRating = ratings.reduce((a, b) => a + b, 0) / (ratings.length || 1);
-  const variance = ratings.reduce((a, b) => a + Math.pow(b - meanRating, 2), 0) / (ratings.length || 1);
-  const avgTextLen = validReviews.reduce((a, r) => a + (r.text ? r.text.length : 0), 0) / (validReviews.length || 1);
-  const isLowVariance = variance < 0.05 && meanRating > 4.8 && avgTextLen < 40;
-/*Meaning:
-almost everyone gave 5 stars
-ratings hardly vary
-reviews are very short */
-  // Authenticity Penalty Calculation
-  let authPenalty = 0;
-  if (duplicateCount > 0) authPenalty += Math.min(0.4, (duplicateCount / totalReviewsCount) * 0.8);
-  if (isVelocitySpike) authPenalty += 0.35;
-  if (isLowVariance) authPenalty += 0.35;
-  const authenticityScore = Math.max(0.05, Number((1 - authPenalty).toFixed(2)));
+  // Pass 2: Audit each review individually
+  const auditedReviews = reviews.map(r => {
+    const auditRes = auditSingleReview(r, reviews, velocitySpikeDates);
+    return {
+      ...r,
+      spamScore: auditRes.spamScore,
+      reasons: auditRes.reasons,
+      confidence: auditRes.confidence
+    };
+  });
 
-  // Metric Computations
+  // Calculate Product Authenticity Score
+  const avgSpamScore = auditedReviews.reduce((sum, r) => sum + r.spamScore, 0) / totalReviewsCount;
+  const authenticityScore = Number((1.0 - avgSpamScore).toFixed(3));
+
+  // Pass 3: Process valid reviews (spamScore < 0.60) to calculate aggregates
+  const validReviews = auditedReviews.filter(r => r.spamScore < 0.60);
+  const validCount = validReviews.length;
+
   let weightedRatingSum = 0;
   let totalDecayWeight = 0;
   let sentimentSum = 0;
@@ -126,7 +190,7 @@ reviews are very short */
 
   for (const r of validReviews) {
     const decay = calculateTimeDecay(r.date);
-    const sent = useSyncSentiment ? analyzeNLPSentimentSync(r.text) : await calculateSentiment(r.text);
+    const sent = useSyncSentiment ? analyzeNLPSentimentSync(r.text) : await analyzeNLPSentiment(r.text);
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 
@@ -137,7 +201,6 @@ reviews are very short */
     if (r.verified) verifiedCount++;
   }
 
-  const validCount = validReviews.length;
   const genuineRating = totalDecayWeight > 0 ? Number((weightedRatingSum / totalDecayWeight).toFixed(1)) : 0;
   const sentimentScore = validCount > 0 ? Number((sentimentSum / validCount).toFixed(2)) : 0.5;
   const verifiedRatio = validCount > 0 ? Number((verifiedCount / validCount).toFixed(2)) : 0;
@@ -155,6 +218,9 @@ reviews are very short */
     genuineRating,
     validReviewsCount: validCount,
     totalReviewsCount,
-    isLowReviewCount: false
+    isLowReviewCount: totalReviewsCount < 10,
+    auditedReviews
   };
 }
+
+export default { auditProductReviews, calculateTimeDecay, calculateTypeTokenRatio };

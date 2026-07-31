@@ -1,32 +1,41 @@
 import express from 'express';
 import cors from 'cors';
-import dotenv from 'dotenv';
+import helmet from 'helmet';
+import config from './config/env.js';
 import { connectDB } from './config/db.js';
 import { seedDatabase } from './services/seedService.js';
 import apiRoutes from './routes/api.js';
+import { errorHandler } from './middlewares/errorHandler.js';
 
-dotenv.config();
+const app = express();
 
-const app = express();//Express Application Object.
-const PORT = process.env.PORT || 5000;
+// Secure backend with Helmet security headers
+app.use(helmet());
 
-// Middleware
-app.use(cors());//Allow cross-origin requests.
-app.use(express.json());//Express automatically parses JSON.
+// Configure Cross-Origin Resource Sharing (CORS)
+app.use(cors({
+  origin: '*', // In production, customize this to allow only trust domains
+  methods: ['GET', 'POST', 'PUT', 'DELETE'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
+app.use(express.json());
 
 // API Routes
-app.use('/api', apiRoutes);//Any request whose URL starts with /api should be handled by the router defined in routes/api.js.
+app.use('/api', apiRoutes);
 
-// Health Endpoint
-app.get('/', (req, res) => { //If this endpoint works,the backend is alive.
-
+// Base health status check
+app.get('/', (req, res) => {
   res.json({
     status: 'online',
     service: 'TrustRank Enterprise Microservice Gateway',
     version: '1.0.0',
-    documentation: 'GET /api/search, POST /api/reviews, POST /api/admin/audit'
+    documentation: 'GET /api/v1/search, POST /api/v1/reviews, POST /api/v1/admin/audit'
   });
 });
+
+// Centralized error handling middleware (handles all next(err) downstream exceptions)
+app.use(errorHandler);
 
 // Boot Sequence
 async function startServer() {
@@ -34,12 +43,12 @@ async function startServer() {
   console.log(`🚀 STARTING TRUSTRANK BACKEND MICROSERVICE GATEWAY`);
   console.log(`======================================================\n`);
 
-  // Start listening on port immediately so that Render detects an active port binding without delay
-  app.listen(PORT, async () => {
-    console.log(`\n🌐 Express REST API Server running live at: http://localhost:${PORT}`);
+  // Start listening on port immediately to guarantee instant Render port binding and deployment success
+  app.listen(config.port, async () => {
+    console.log(`\n🌐 Express REST API Server running live at: http://localhost:${config.port}`);
     console.log(`📡 Cloud API Endpoints Active:`);
-    console.log(`   - Search API:  http://localhost:${PORT}/api/search?q=shirt`);
-    console.log(`   - Stats API:   http://localhost:${PORT}/api/stats`);
+    console.log(`   - Search API:  http://localhost:${config.port}/api/v1/search?q=shirt`);
+    console.log(`   - Stats API:   http://localhost:${config.port}/api/v1/stats`);
     console.log(`======================================================\n`);
 
     // Run connection and seeding asynchronously in the background
