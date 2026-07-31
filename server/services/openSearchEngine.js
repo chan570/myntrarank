@@ -1,8 +1,7 @@
 /**
  * TRUSTRANK AMAZON OPENSEARCH SERVICE
- * Integration with Amazon OpenSearch / Elasticsearch REST DSL.
- * Implements real-time indexing, autocomplete prefix matching, Painless script ranking,
- * and standard in-memory search fallback when OpenSearch is offline.
+ * Direct integration with Amazon OpenSearch / Elasticsearch REST DSL.
+ * Pure execution path with no local in-memory fallbacks.
  */
 
 import { Client } from '@opensearch-project/opensearch';
@@ -18,64 +17,57 @@ export class OpenSearchEngine {
       requestTimeout: 10000
     });
     this.initPromise = null;
-    this.isOffline = false;
   }
 
-  // Verify and initialize index mapping
+  // Verify and initialize index mapping (throws error on failure)
   async init() {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      try {
-        console.log(`[OpenSearch Engine] Connecting to Amazon OpenSearch / Elasticsearch cluster at ${OPENSEARCH_NODE}...`);
-        const pingRes = await this.client.ping();
-        if (!pingRes) {
-          throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
-        }
-        console.log(`[OpenSearch Engine] Connected to OpenSearch Cluster successfully.`);
+      console.log(`[OpenSearch Engine] Connecting to Amazon OpenSearch / Elasticsearch cluster at ${OPENSEARCH_NODE}...`);
+      const pingRes = await this.client.ping();
+      if (!pingRes) {
+        throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
+      }
+      console.log(`[OpenSearch Engine] Connected to OpenSearch Cluster successfully.`);
 
-        const indexExists = await this.client.indices.exists({ index: INDEX_NAME });
-        if (!indexExists.body) {
-          await this.client.indices.create({
-            index: INDEX_NAME,
-            body: {
-              mappings: {
-                properties: {
-                  id: { type: 'keyword' },
-                  title: { type: 'text', analyzer: 'standard' },
-                  brand: { type: 'keyword' },
-                  description: { type: 'text' },
-                  category: { type: 'keyword' },
-                  tags: { type: 'keyword' },
-                  price: { type: 'float' },
-                  originalPrice: { type: 'float' },
-                  discountPercent: { type: 'float' },
-                  anomalyType: { type: 'keyword' },
-                  isSuspicious: { type: 'boolean' },
-                  auditedMetrics: {
-                    properties: {
-                      authenticityScore: { type: 'double' },
-                      sentimentScore: { type: 'double' },
-                      verifiedRatio: { type: 'double' },
-                      richnessScore: { type: 'double' },
-                      recencyScore: { type: 'double' },
-                      ratingScore: { type: 'double' },
-                      genuineRating: { type: 'double' },
-                      validReviewsCount: { type: 'integer' },
-                      totalReviewsCount: { type: 'integer' },
-                      isLowReviewCount: { type: 'boolean' }
-                    }
+      const indexExists = await this.client.indices.exists({ index: INDEX_NAME });
+      if (!indexExists.body) {
+        await this.client.indices.create({
+          index: INDEX_NAME,
+          body: {
+            mappings: {
+              properties: {
+                id: { type: 'keyword' },
+                title: { type: 'text', analyzer: 'standard' },
+                brand: { type: 'keyword' },
+                description: { type: 'text' },
+                category: { type: 'keyword' },
+                tags: { type: 'keyword' },
+                price: { type: 'float' },
+                originalPrice: { type: 'float' },
+                discountPercent: { type: 'float' },
+                anomalyType: { type: 'keyword' },
+                isSuspicious: { type: 'boolean' },
+                auditedMetrics: {
+                  properties: {
+                    authenticityScore: { type: 'double' },
+                    sentimentScore: { type: 'double' },
+                    verifiedRatio: { type: 'double' },
+                    richnessScore: { type: 'double' },
+                    recencyScore: { type: 'double' },
+                    ratingScore: { type: 'double' },
+                    genuineRating: { type: 'double' },
+                    validReviewsCount: { type: 'integer' },
+                    totalReviewsCount: { type: 'integer' },
+                    isLowReviewCount: { type: 'boolean' }
                   }
                 }
               }
             }
-          });
-          console.log(`[OpenSearch Engine] Created index '${INDEX_NAME}' with custom metric mapping.`);
-        }
-      } catch (err) {
-        console.warn(`[OpenSearch Engine] Primary OpenSearch connection failed: ${err.message}`);
-        console.log(`[OpenSearch Engine] Activating local MongoDB/In-Memory fallback search engine.`);
-        this.isOffline = true;
+          }
+        });
+        console.log(`[OpenSearch Engine] Created index '${INDEX_NAME}' with custom metric mapping.`);
       }
     })();
 
@@ -85,69 +77,32 @@ export class OpenSearchEngine {
   // Get single document by ID
   async getDocument(id) {
     await this.init();
-    if (this.isOffline) {
-      try {
-        const { Product } = await import('../models/Product.js');
-        return Product.findOne({ id }).lean();
-      } catch (err) {
-        return null;
-      }
-    }
-    try {
-      const res = await this.client.get({ index: INDEX_NAME, id });
-      return res.body._source;
-    } catch (err) {
-      return null;
-    }
+    const res = await this.client.get({ index: INDEX_NAME, id });
+    return res.body._source;
   }
 
   // Get all documents
   async getAllDocuments() {
     await this.init();
-    if (this.isOffline) {
-      try {
-        const { Product } = await import('../models/Product.js');
-        return Product.find().lean();
-      } catch (err) {
-        return [];
-      }
-    }
-    try {
-      const res = await this.client.search({
-        index: INDEX_NAME,
-        body: { size: 1000, query: { match_all: {} } }
-      });
-      const hits = res.body.hits.hits || [];
-      return hits.map(h => h._source);
-    } catch (err) {
-      return [];
-    }
+    const res = await this.client.search({
+      index: INDEX_NAME,
+      body: { size: 1000, query: { match_all: {} } }
+    });
+    const hits = res.body.hits.hits || [];
+    return hits.map(h => h._source);
   }
 
   // Get total document count
   async getDocumentCount() {
     await this.init();
-    if (this.isOffline) {
-      try {
-        const { Product } = await import('../models/Product.js');
-        return Product.countDocuments();
-      } catch (err) {
-        return 0;
-      }
-    }
-    try {
-      const res = await this.client.count({ index: INDEX_NAME });
-      return res.body.count;
-    } catch (err) {
-      return 0;
-    }
+    const res = await this.client.count({ index: INDEX_NAME });
+    return res.body.count;
   }
 
   // Insert or update a single document
   async upsertDocument(product) {
     if (!product || !product.id) return;
     await this.init();
-    if (this.isOffline) return;
 
     const metrics = product.auditedMetrics || {};
     const doc = {
@@ -190,7 +145,6 @@ export class OpenSearchEngine {
   async bulkIndex(products) {
     if (!Array.isArray(products) || products.length === 0) return;
     await this.init();
-    if (this.isOffline) return;
 
     const body = products.flatMap(p => {
       const metrics = p.auditedMetrics || {};
@@ -235,48 +189,24 @@ export class OpenSearchEngine {
     const query = queryText.trim().toLowerCase();
     if (!query) return [];
 
-    if (this.isOffline) {
-      try {
-        const { Product } = await import('../models/Product.js');
-        const matches = await Product.find({
-          $or: [
-            { title: { $regex: '^' + query, $options: 'i' } },
-            { brand: { $regex: '^' + query, $options: 'i' } }
-          ]
-        }).limit(8).lean();
-        return matches.map(p => ({
-          id: p.id,
-          title: p.title,
-          brand: p.brand,
-          category: p.category
-        }));
-      } catch (err) {
-        return [];
-      }
-    }
-
-    try {
-      const response = await this.client.search({
-        index: INDEX_NAME,
-        body: {
-          size: 8,
-          query: {
-            match_phrase_prefix: {
-              title: query
-            }
+    const response = await this.client.search({
+      index: INDEX_NAME,
+      body: {
+        size: 8,
+        query: {
+          match_phrase_prefix: {
+            title: query
           }
         }
-      });
-      const hits = response.body.hits.hits || [];
-      return hits.map(h => ({
-        id: h._source.id,
-        title: h._source.title,
-        brand: h._source.brand,
-        category: h._source.category
-      }));
-    } catch (err) {
-      return [];
-    }
+      }
+    });
+    const hits = response.body.hits.hits || [];
+    return hits.map(h => ({
+      id: h._source.id,
+      title: h._source.title,
+      brand: h._source.brand,
+      category: h._source.category
+    }));
   }
 
   // Execute Search Query (DSL + Painless Script Scoring + Explanation)
@@ -298,104 +228,6 @@ export class OpenSearchEngine {
       minRating = 0,
       categoryFilter = 'All'
     } = filters;
-
-    if (this.isOffline) {
-      try {
-        const { Product } = await import('../models/Product.js');
-        const dbProducts = await Product.find().lean();
-        
-        let list = dbProducts;
-        if (categoryFilter && categoryFilter !== 'All') {
-          list = list.filter(p => p.category === categoryFilter);
-        }
-
-        const query = queryText.toLowerCase().trim();
-        if (query) {
-          list = list.filter(p => 
-            p.title.toLowerCase().includes(query) ||
-            p.brand.toLowerCase().includes(query) ||
-            p.category.toLowerCase().includes(query) ||
-            (p.tags && p.tags.some(t => t.toLowerCase().includes(query)))
-          );
-        }
-
-        if (filterLowReviews) {
-          list = list.filter(p => {
-            const totalReviews = p.auditedMetrics?.totalReviewsCount ?? (p.reviews ? p.reviews.length : 0);
-            return totalReviews >= 10 && p.anomalyType !== "low_review_count";
-          });
-        }
-        if (minRating > 0) {
-          list = list.filter(p => (p.auditedMetrics?.genuineRating ?? 0) >= minRating);
-        }
-        if (removeSuspicious) {
-          list = list.filter(p => {
-            const authScore = p.auditedMetrics?.authenticityScore ?? 1.0;
-            const isFake = p.isSuspicious || authScore < 0.60 || (p.anomalyType && p.anomalyType !== 'low_review_count');
-            return !isFake;
-          });
-        }
-
-        const results = list.map(p => {
-          const m = p.auditedMetrics || {};
-          const authScore = m.authenticityScore ?? 1.0;
-          const isFake = p.isSuspicious || authScore < 0.60 || (p.anomalyType && p.anomalyType !== 'low_review_count');
-          
-          // TrustRank Score
-          const trustScore = (wAuth * authScore) + 
-                             (wSent * (m.sentimentScore ?? 0.5)) + 
-                             (wVer * (m.verifiedRatio ?? 0.8)) + 
-                             (wRich * (m.richnessScore ?? 0.5)) + 
-                             (wRec * (m.recencyScore ?? 0.5)) + 
-                             (wRate * (m.ratingScore ?? 0.8));
-
-          // Mock search relevance weight (offline mode defaults query match score to 1.0)
-          const searchRelevance = queryText ? 1.0 : 0.5;
-
-          // Composite SDE Ranking Score
-          const finalScore = (RANKING_WEIGHTS.relevance * searchRelevance) +
-                             (RANKING_WEIGHTS.trustScore * trustScore) +
-                             (RANKING_WEIGHTS.rating * (m.ratingScore ?? 0.8)) +
-                             (RANKING_WEIGHTS.recency * (m.recencyScore ?? 0.5));
-
-          const rankingExplanation = {
-            relevanceScore: Number(searchRelevance.toFixed(2)),
-            trustScore: Number(trustScore.toFixed(3)),
-            ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
-            recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
-            weights: RANKING_WEIGHTS,
-            text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${searchRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
-          };
-
-          return {
-            ...p,
-            id: p.id,
-            authenticityScore: authScore,
-            rawAvgRating: m.genuineRating ?? 4.0,
-            totalReviewsCount: m.totalReviewsCount ?? (p.reviews ? p.reviews.length : 0),
-            isFlaggedAsFake: isFake,
-            isSuspicious: isFake,
-            relevanceScore: searchRelevance,
-            compositeTrustScore: Number(authScore.toFixed(3)),
-            finalRankScore: Number(finalScore.toFixed(3)),
-            rankingExplanation
-          };
-        });
-
-        results.sort((a, b) => b.finalRankScore - a.finalRankScore);
-
-        return {
-          engine: 'In-Memory MongoDB Search Fallback (OpenSearch Offline)',
-          results,
-          totalMatches: results.length,
-          totalIndexed: dbProducts.length,
-          executionTimeMs: Number((performance.now() - startTime).toFixed(3))
-        };
-      } catch (err) {
-        console.error("MongoDB Search Fallback Error:", err);
-        return { results: [], totalMatches: 0, executionTimeMs: 0 };
-      }
-    }
 
     // DSL Search Engine Path
     const queryTokens = queryText.toLowerCase().trim().split(/\s+/).filter(Boolean);
@@ -463,64 +295,58 @@ export class OpenSearchEngine {
       }
     };
 
-    try {
-      const response = await this.client.search({
-        index: INDEX_NAME,
-        body: searchBody
-      });
+    const response = await this.client.search({
+      index: INDEX_NAME,
+      body: searchBody
+    });
 
-      const hits = response.body.hits.hits || [];
-      const results = hits.map(hit => {
-        const doc = hit._source;
-        const finalScore = hit._score || 1.0;
-        const m = doc.auditedMetrics || {};
-        const authScore = m.authenticityScore ?? 1.0;
-        const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
+    const hits = response.body.hits.hits || [];
+    const results = hits.map(hit => {
+      const doc = hit._source;
+      const finalScore = hit._score || 1.0;
+      const m = doc.auditedMetrics || {};
+      const authScore = m.authenticityScore ?? 1.0;
+      const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
 
-        const trustScore = (wAuth * authScore) + 
-                           (wSent * (m.sentimentScore ?? 0.5)) + 
-                           (wVer * (m.verifiedRatio ?? 0.8)) + 
-                           (wRich * (m.richnessScore ?? 0.5)) + 
-                           (wRec * (m.recencyScore ?? 0.5)) + 
-                           (wRate * (m.ratingScore ?? 0.8));
+      const trustScore = (wAuth * authScore) + 
+                         (wSent * (m.sentimentScore ?? 0.5)) + 
+                         (wVer * (m.verifiedRatio ?? 0.8)) + 
+                         (wRich * (m.richnessScore ?? 0.5)) + 
+                         (wRec * (m.recencyScore ?? 0.5)) + 
+                         (wRate * (m.ratingScore ?? 0.8));
 
-        const queryRelevance = Math.min(1.0, (finalScore - (RANKING_WEIGHTS.trustScore * trustScore)) / RANKING_WEIGHTS.relevance);
+      const queryRelevance = Math.min(1.0, (finalScore - (RANKING_WEIGHTS.trustScore * trustScore)) / RANKING_WEIGHTS.relevance);
 
-        const rankingExplanation = {
-          relevanceScore: Number(queryRelevance.toFixed(2)),
-          trustScore: Number(trustScore.toFixed(3)),
-          ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
-          recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
-          weights: RANKING_WEIGHTS,
-          text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${queryRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
-        };
-
-        return {
-          ...doc,
-          authenticityScore: authScore,
-          rawAvgRating: m.genuineRating ?? 4.0,
-          totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
-          isFlaggedAsFake: isFake,
-          isSuspicious: isFake,
-          relevanceScore: Number(queryRelevance.toFixed(2)),
-          compositeTrustScore: Number(authScore.toFixed(3)),
-          finalRankScore: Number(finalScore.toFixed(3)),
-          rankingExplanation
-        };
-      });
+      const rankingExplanation = {
+        relevanceScore: Number(queryRelevance.toFixed(2)),
+        trustScore: Number(trustScore.toFixed(3)),
+        ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
+        recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
+        weights: RANKING_WEIGHTS,
+        text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${queryRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
+      };
 
       return {
-        engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
-        results,
-        totalMatches: results.length,
-        totalIndexed: response.body.hits.total.value || results.length,
-        executionTimeMs: Number((performance.now() - startTime).toFixed(3))
+        ...doc,
+        authenticityScore: authScore,
+        rawAvgRating: m.genuineRating ?? 4.0,
+        totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
+        isFlaggedAsFake: isFake,
+        isSuspicious: isFake,
+        relevanceScore: Number(queryRelevance.toFixed(2)),
+        compositeTrustScore: Number(authScore.toFixed(3)),
+        finalRankScore: Number(finalScore.toFixed(3)),
+        rankingExplanation
       };
-    } catch (err) {
-      console.error("OpenSearch executeQuery error, running MongoDB fallback:", err);
-      this.isOffline = true;
-      return this.executeQuery(queryText, weights, filters);
-    }
+    });
+
+    return {
+      engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
+      results,
+      totalMatches: results.length,
+      totalIndexed: response.body.hits.total.value || results.length,
+      executionTimeMs: Number((performance.now() - startTime).toFixed(3))
+    };
   }
 }
 

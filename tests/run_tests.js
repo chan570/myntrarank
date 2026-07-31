@@ -6,6 +6,22 @@
 import assert from 'assert';
 import { hashString, calculateTypeTokenRatio, countRepeatedWords, calculateTimeDecay, auditProductReviews } from '../server/services/auditEngine.js';
 
+// Mock global.fetch to simulate Python FastAPI ML NLP API during offline tests
+global.fetch = async (url) => {
+  if (url.endsWith('/predict')) {
+    return {
+      ok: true,
+      json: async () => ({
+        status: 'success',
+        sentiment: 'POSITIVE',
+        score: 0.85,
+        confidence: 0.90
+      })
+    };
+  }
+  throw new Error(`Unhandled fetch call to ${url}`);
+};
+
 console.log("\n======================================================");
 console.log("🧪 STARTING TRUSTRANK ENTERPRISE UNIT AND INTEGRATION TESTS");
 console.log("======================================================\n");
@@ -72,7 +88,7 @@ test("Comprehensive Product Reviews Auditing", async () => {
     { id: "rev-4", text: "Worst dress, extremely cheap loose thread.", rating: 1, verified: true, date: Date.now() }
   ];
   
-  const result = await auditProductReviews(reviews, true);
+  const result = await auditProductReviews(reviews);
   
   assert.strictEqual(result.totalReviewsCount, 4);
   assert.ok(result.authenticityScore < 1.0); // Duplicate text should decrease authenticity

@@ -5,7 +5,7 @@
  * spike detection, rating anomaly audits, and configures spam scores per review.
  */
 
-import { analyzeNLPSentiment, analyzeNLPSentimentSync } from './nlpEngine.js';
+import { analyzeNLPSentiment } from './nlpEngine.js';
 import { TRUST_WEIGHTS, TIME_DECAY_HALF_LIFE_DAYS } from '../constants/weights.js';
 
 // DJB2 Hash String Primitive for fast duplicate checks
@@ -130,7 +130,7 @@ export function auditSingleReview(review, allReviews, velocitySpikeDates) {
 }
 
 // Multi-Pass Review Auditing Routine
-export async function auditProductReviews(reviews, useSyncSentiment = false) {
+export async function auditProductReviews(reviews) {
   if (!reviews || !Array.isArray(reviews) || reviews.length === 0) {
     return {
       authenticityScore: 1.0,
@@ -190,7 +190,7 @@ export async function auditProductReviews(reviews, useSyncSentiment = false) {
 
   for (const r of validReviews) {
     const decay = calculateTimeDecay(r.date);
-    const sent = useSyncSentiment ? analyzeNLPSentimentSync(r.text) : await analyzeNLPSentiment(r.text);
+    const sent = await analyzeNLPSentiment(r.text);
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 
