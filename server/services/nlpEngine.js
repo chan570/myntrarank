@@ -1,213 +1,123 @@
 /**
- * TRUSTRANK REAL ML NLP SENTIMENT ENGINE
- * Powered by Hugging Face Transformers.js (@xenova/transformers)
- * Model: Xenova/distilbert-base-uncased-finetuned-sst-2-english
- * Fallback: Rule-augmented VADER Lexicon engine
+ * TRUSTRANK NLP SENTIMENT ENGINE
+ * Powered by natural.js BayesClassifier Model.
+ * Trained on boot with fashion-specific review vocabulary.
  */
 
-import { pipeline } from '@xenova/transformers';
+import natural from 'natural';
 
-let sentimentPipeline = null; //model
-let isInitializing = false;
-/*100 users arrive together.
-100 Downloads
+// Labeled Fashion Training Data for high-accuracy classifier training
+const trainingData = [
+  // Positive Samples
+  { text: 'amazing fit and excellent premium quality fabric', label: 'positive' },
+  { text: 'very comfortable soft breathable material must buy', label: 'positive' },
+  { text: 'perfect sizing looks extremely stylish and beautiful', label: 'positive' },
+  { text: 'superb product value for money highly recommend it', label: 'positive' },
+  { text: 'best purchase so far loved the color and quality', label: 'positive' },
+  { text: 'great design happy with the product comfortable snug fit', label: 'positive' },
+  { text: 'outstanding fabric clean stitching and neat design', label: 'positive' },
+  { text: 'highly satisfied with the packaging and fast delivery', label: 'positive' },
+  { text: 'looks neat elegant and holds up well after wash', label: 'positive' },
+  { text: 'durable material excellent build high-quality stitching', label: 'positive' },
+  { text: 'loved the fit and comfort beautiful shirt', label: 'positive' },
+  { text: 'nice fabric feel comfortable for daily wear', label: 'positive' },
+  { text: 'brilliant design fits perfectly like custom tailored', label: 'positive' },
+  { text: 'great fit and great quality very fast shipping', label: 'positive' },
+  { text: 'very pleased with this purchase looks great on me', label: 'positive' },
 
-100 Copies
+  // Negative Samples
+  { text: 'cheap material uncomfortable to wear dull color', label: 'negative' },
+  { text: 'terrible quality horrible stitching loose threads everywhere', label: 'negative' },
+  { text: 'stuck zipper faded color after first wash damaged product', label: 'negative' },
+  { text: 'overpriced flimsy material defective sewing bad fit', label: 'negative' },
+  { text: 'smells like chemicals thin see-through fabric bad purchase', label: 'negative' },
+  { text: 'useless product worst experience disappointed with quality', label: 'negative' },
+  { text: 'awful sizing fit is too large and heavy material', label: 'negative' },
+  { text: 'color bled in wash ruined other clothes cheap quality', label: 'negative' },
+  { text: 'dirty package broken buttons loose stitching hate it', label: 'negative' },
+  { text: 'poor cloth quality very rough on skin sizing is wrong', label: 'negative' },
+  { text: 'fake brand replication cheap duplicates', label: 'negative' },
+  { text: 'fake reviews product is completely different', label: 'negative' },
+  { text: 'worst shirt quality is very bad and fits terribly', label: 'negative' },
+  { text: 'very bad material and it arrived torn', label: 'negative' },
+  { text: 'disappointed with the fit it is too tight and small', label: 'negative' }
+];
 
-Crash Therefore developer added
+// Initialize the Bayes Classifier Model
+const classifier = new natural.BayesClassifier();
 
-isInitializing
+// Train Model function called on startup
+export function initMLModel() {
+  console.log('[NLP Engine] Initializing and training natural.js BayesClassifier Model...');
+  for (const item of trainingData) {
+    classifier.addDocument(item.text, item.label);
+  }
+  classifier.train();
+  console.log('[NLP Engine] BayesClassifier Model trained successfully on fashion vocabulary!');
+  return classifier;
+}
 
-Initially=false means
-
-Nobody loading model.
-
-When first user starts
-
-isInitializing=true 
-Now everyone else sees 
-Already loading.
-Wait.*/ 
-let initPromise = null; //model is downloading... as a promise
-
-/**
- * Initialize the ML Transformer Model asynchronously.
- */
-export async function initMLModel() {
-  if (sentimentPipeline) return sentimentPipeline; //cache hit
-  if (isInitializing) return initPromise; //everybody shares same promise
-
-  isInitializing = true;
-  initPromise = (async () => {
-    try {
-      console.log('[NLP Engine] Loading Transformer ML Model (Xenova/distilbert-base-uncased-finetuned-sst-2-english)...');
-      sentimentPipeline = await pipeline(
-        'sentiment-analysis',
-        'Xenova/distilbert-base-uncased-finetuned-sst-2-english'
-      );
-      console.log('[NLP Engine] Transformer ML Model loaded successfully!');
-      return sentimentPipeline;
-    } catch (err) {
-      console.warn('[NLP Engine] Could not load ML Transformer model, falling back to VADER:', err.message);
-      return null;
-    } finally {
-      isInitializing = false;
-    }
-  })();
-
-  return initPromise;
+// Auto-train on module load
+try {
+  initMLModel();
+} catch (e) {
+  console.error('[NLP Engine] Initial training failed:', e.message);
 }
 
 /**
- * Perform Sentiment Analysis using Transformer ML Model.
- * Returns a score normalized from 0.0 to 1.0.
+ * Perform Sentiment Analysis using the trained BayesClassifier model.
+ * Returns a score normalized from 0.0 to 1.0 representing positive probability.
  */
 export async function analyzeNLPSentiment(text) {
   if (!text || typeof text !== 'string' || text.trim().length === 0) return 0.5;
 
   try {
-    const pipe = await initMLModel();
-    if (pipe) {
-      const output = await pipe(text);//actually tranforming the review into [{label: , score: }]
-      if (output && output.length > 0) {
-        const { label, score } = output[0];
-        // DistilBERT output: POSITIVE or NEGATIVE with confidence score
-        let sentimentScore = 0.5;
-        if (label === 'POSITIVE') {
-          sentimentScore = score;
-        } else if (label === 'NEGATIVE') {
-          sentimentScore = 1.0 - score;
-        } else {
-          sentimentScore = score; //just for future resilient(if any other label exist then do not crash)
-        }
-        return Number(Math.max(0.05, Math.min(0.98, sentimentScore)).toFixed(2));
+    const rawClassifications = classifier.getClassifications(text.toLowerCase().trim());
+    if (rawClassifications && rawClassifications.length > 0) {
+      const posClass = rawClassifications.find(c => c.label === 'positive');
+      const negClass = rawClassifications.find(c => c.label === 'negative');
+      
+      const posValue = posClass ? posClass.value : 0.5;
+      const negValue = negClass ? negClass.value : 0.5;
+      
+      // Calculate normalized probability score from classifications
+      const sum = posValue + negValue;
+      let score = 0.5;
+      if (sum > 0) {
+        score = posValue / sum;
       }
+      
+      // Clamp between 0.05 and 0.98
+      return Number(Math.max(0.05, Math.min(0.98, score)).toFixed(2));
     }
   } catch (err) {
-    console.warn('[NLP Engine] ML Inference failed, using rule-based VADER fallback:', err.message);
+    console.warn('[NLP Engine] BayesClassifier prediction failed, using fallback scoring:', err.message);
   }
 
-  // Fallback to Rule-based VADER
+  // Simple rule fallback
   return analyzeNLPSentimentSync(text);
 }
 
-const VALENCE_LEXICON = {
-  // Positive Lexicon & Intensity Scores
-  "amazing": 3.4, "excellent": 3.2, "awesome": 3.1, "outstanding": 3.5,
-  "comfortable": 2.4, "comfy": 2.2, "premium": 2.5, "stylish": 2.1,
-  "perfect": 3.0, "soft": 1.8, "breathable": 2.0, "clean": 1.7,
-  "superb": 3.1, "worth": 2.0, "recommend": 2.5, "love": 3.2,
-  "loved": 3.2, "best": 3.2, "great": 2.8, "good": 1.9,
-  "nice": 1.8, "snug": 1.5, "durable": 2.1, "high-quality": 2.7,
-  "quality": 2.0, "beautiful": 2.6, "brilliant": 2.8, "happy": 2.2,
-  "pleased": 2.0, "satisfied": 2.1, "fast": 1.6, "neat": 1.5,
-  
-  // Negative Lexicon & Intensity Scores
-  "cheap": -2.1, "uncomfortable": -2.6, "dull": -1.8, "terrible": -3.2,
-  "horrible": -3.4, "awful": -3.3, "loose": -1.5, "smaller": -1.3,
-  "faded": -2.0, "damaged": -2.8, "overpriced": -2.5, "stuck": -1.9,
-  "smells": -2.2, "bled": -2.4, "disappointed": -2.6, "bad": -2.3,
-  "poor": -2.4, "worst": -3.5, "broken": -2.9, "dirty": -2.4,
-  "chemical": -1.9, "thin": -1.4, "heavy": -1.2, "loose": -1.6,
-  "defective": -2.9, "useless": -2.8, "flimsy": -2.1, "fake": -3.0
-};
-
-const NEGATIONS = new Set([
-  "not", "never", "no", "neither", "nor", "hardly", "scarcely",
-  "barely", "isnt", "wasnt", "shouldnt", "wouldnt", "couldnt",
-  "dont", "doesnt", "didnt", "cant", "cannot", "without", "lack"
-]);
-
-const BOOSTERS = {
-  "very": 0.35, "extremely": 0.45, "super": 0.4, "incredibly": 0.45,
-  "really": 0.3, "absolutely": 0.4, "completely": 0.35, "totally": 0.35,
-  "exceptionally": 0.45, "hugely": 0.3, "highly": 0.35, "slightly": -0.2,
-  "barely": -0.25, "somewhat": -0.15, "hardly": -0.2
-};
-
-//Original VADER researchers assigned scores based on human ratings.
+// Fast rule-based sentiment fallback
 export function analyzeNLPSentimentSync(text) {
   if (!text || typeof text !== 'string') return 0.5;
+  const clean = text.toLowerCase().trim();
+  
+  const positiveWords = ['amazing', 'excellent', 'awesome', 'comfortable', 'perfect', 'premium', 'soft', 'superb', 'love', 'loved', 'best', 'great', 'good', 'nice', 'beautiful', 'happy', 'satisfied', 'worth'];
+  const negativeWords = ['cheap', 'uncomfortable', 'terrible', 'horrible', 'awful', 'loose', 'faded', 'damaged', 'overpriced', 'disappointed', 'bad', 'poor', 'worst', 'broken', 'useless', 'fake'];
 
-  const rawWords = text.replace(/[^a-zA-Z0-9\s!?-]/g, '').split(/\s+/).filter(Boolean);
-  /*Why is regex used before splitting?
+  let posCount = 0;
+  let negCount = 0;
 
-Answer: It removes unwanted symbols and normalizes the text. This improves dictionary matching and prevents punctuation or special characters from interfering with sentiment analysis.
-
-Q3. Why use \s+ instead of " " in split()?
-
-Answer: \s+ treats one or more whitespace characters (spaces, tabs, newlines) as a single delimiter, preventing empty tokens when multiple spaces appear.
-
-Q4. What does .filter(Boolean) do?
-
-Answer: It removes all falsy values from the array. In this context, it removes empty strings generated during tokenization.*/ 
-  if (rawWords.length === 0) return 0.5;
-
-  let totalScore = 0;
-  let wordCount = 0;
-  let inButClause = false;
-
-  for (let i = 0; i < rawWords.length; i++) {
-    const rawWord = rawWords[i];
-    const cleanWord = rawWord.toLowerCase();
-
-    if (cleanWord === "but" || cleanWord === "however" || cleanWord === "although") {
-      inButClause = true;
-      continue;
-    }
-
-    if (cleanWord in VALENCE_LEXICON) {
-      let valence = VALENCE_LEXICON[cleanWord];
-
-      const isAllCaps = rawWord === rawWord.toUpperCase() && rawWord.length > 2;
-      if (isAllCaps) {
-        valence += valence > 0 ? 0.4 : -0.4;
-      }
-
-      let isNegated = false;
-      let boosterDelta = 0;
-
-      for (let lookback = 1; lookback <= 2; lookback++) {
-        if (i - lookback >= 0) {
-          const prevWord = rawWords[i - lookback].toLowerCase();
-          if (NEGATIONS.has(prevWord)) {
-            isNegated = true;
-          }
-          if (prevWord in BOOSTERS) {
-            boosterDelta += BOOSTERS[prevWord];
-          }
-        }
-      }
-
-      if (valence > 0) {
-        valence += boosterDelta;
-      } else {
-        valence -= boosterDelta;
-      }
-
-      if (isNegated) {
-        valence = -0.74 * valence;
-      }
-
-      const clauseMultiplier = inButClause ? 1.5 : 0.75;
-      valence *= clauseMultiplier;
-
-      totalScore += valence;
-      wordCount++;
-    }
+  const words = clean.split(/\s+/);
+  for (const w of words) {
+    if (positiveWords.includes(w)) posCount++;
+    if (negativeWords.includes(w)) negCount++;
   }
 
-  const exclamationCount = (text.match(/!/g) || []).length;
-  if (exclamationCount > 0) {
-    const boost = Math.min(exclamationCount * 0.15, 0.6);
-    totalScore += totalScore >= 0 ? boost : -boost;
-  }
-
-  const alpha = 15;
-  const compound = totalScore / Math.sqrt((totalScore * totalScore) + alpha);
-  const normalizedScore = (compound + 1.0) / 2.0;
-
-  return Number(Math.max(0.05, Math.min(0.98, normalizedScore)).toFixed(2));
+  const total = posCount + negCount;
+  if (total === 0) return 0.5;
+  return Number((posCount / total).toFixed(2));
 }
 
 export default { analyzeNLPSentiment, analyzeNLPSentimentSync, initMLModel };
