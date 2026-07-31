@@ -217,7 +217,15 @@ def train_sentiment_model():
     rec = recall_score(y_test, y_pred)
     f1 = f1_score(y_test, y_pred)
     
+    # 5-Fold Cross Validation
+    from sklearn.model_selection import cross_val_score
+    print("[TRAIN] Running 5-Fold Cross-Validation...")
+    X_all_vec = TfidfVectorizer(ngram_range=(1, 2), min_df=2, max_df=0.95).fit_transform(df['cleaned_text'])
+    cv_scores = cross_val_score(LogisticRegression(C=1.0, max_iter=200, random_state=42), X_all_vec, df['sentiment'], cv=5)
+    mean_cv = cv_scores.mean()
+    
     print(f"[EVAL] Accuracy: {acc:.4f} | Precision: {prec:.4f} | Recall: {rec:.4f} | F1: {f1:.4f}")
+    print(f"[EVAL] 5-Fold CV Scores: {cv_scores} | Mean CV: {mean_cv:.4f}")
     
     # Output evaluation files
     os.makedirs('server/nlp_service/evaluation', exist_ok=True)
@@ -228,11 +236,17 @@ def train_sentiment_model():
         f.write(report)
     
     # 2. Metrics JSON
+    import datetime
     metrics = {
         "accuracy": acc,
         "precision": prec,
         "recall": rec,
         "f1_score": f1,
+        "five_fold_cv_scores": cv_scores.tolist(),
+        "mean_cv_score": mean_cv,
+        "vocabulary_size": len(vectorizer.vocabulary_),
+        "classes": ["NEGATIVE", "POSITIVE"],
+        "training_date": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "dataset_size": len(df),
         "train_size": len(X_train),
         "test_size": len(X_test)
@@ -267,8 +281,26 @@ def train_sentiment_model():
     coefficients = model.coef_[0]
     coef_df = pd.DataFrame({'feature': feature_names, 'coefficient': coefficients})
     coef_df['importance'] = coef_df['coefficient'].abs()
+    coef_df['sentiment_impact'] = coef_df['coefficient'].apply(lambda x: 'positive' if x >= 0 else 'negative')
     coef_df = coef_df.sort_values(by='importance', ascending=False)
     coef_df.to_csv('server/nlp_service/evaluation/feature_importance.csv', index=False)
+    
+    # Print clean summary
+    print("\n" + "="*50)
+    print("=== TRUSTRANK ML NLP EVALUATION PIPELINE SUMMARY ===")
+    print("="*50)
+    print(f"Model Algorithm:    TF-IDF + Logistic Regression")
+    print(f"Dataset Size:       {metrics['dataset_size']} reviews")
+    print(f"Vocabulary Size:    {metrics['vocabulary_size']} features")
+    print(f"Test Set Accuracy:  {acc*100:.2f}%")
+    print(f"Mean 5-Fold CV:     {mean_cv*100:.2f}%")
+    print(f"F1 Score:           {f1:.4f}")
+    
+    top_pos = coef_df[coef_df['sentiment_impact'] == 'positive'].head(5)['feature'].tolist()
+    top_neg = coef_df[coef_df['sentiment_impact'] == 'negative'].head(5)['feature'].tolist()
+    print(f"Top positive words: {top_pos}")
+    print(f"Top negative words: {top_neg}")
+    print("="*50 + "\n")
     
     print("[EVAL] Evaluation artifacts successfully generated in server/nlp_service/evaluation/")
 

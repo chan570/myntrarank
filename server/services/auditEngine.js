@@ -6,7 +6,7 @@
  */
 
 import { analyzeNLPSentiment } from './nlpEngine.js';
-import { TRUST_WEIGHTS, TIME_DECAY_HALF_LIFE_DAYS } from '../constants/weights.js';
+import { TRUST_WEIGHTS, TIME_DECAY_HALF_LIFE_DAYS, AUDIT_THRESHOLDS } from '../constants/weights.js';
 
 // DJB2 Hash String Primitive for fast duplicate checks
 export function hashString(str) {
@@ -69,28 +69,28 @@ export function auditSingleReview(review, allReviews, velocitySpikeDates) {
   const duplicates = allReviews.filter(r => r.id !== review.id && hashString(r.text) === textHash);
   if (duplicates.length > 0) {
     reasons.push('duplicate_text');
-    spamPoints += 0.50;
+    spamPoints += AUDIT_THRESHOLDS.duplicatePenalty;
   }
 
   // 2. Vocabulary Diversity Check (TTR)
   const ttr = calculateTypeTokenRatio(text);
   const wordCount = text.split(/\s+/).filter(Boolean).length;
-  if (wordCount > 6 && ttr < 0.65) {
+  if (wordCount > AUDIT_THRESHOLDS.ttrWordLimit && ttr < AUDIT_THRESHOLDS.ttrThreshold) {
     reasons.push('low_vocabulary_diversity');
-    spamPoints += 0.25;
+    spamPoints += AUDIT_THRESHOLDS.ttrPenalty;
   }
 
   // 3. Repeated Words Check
   const repeatedWords = countRepeatedWords(text);
-  if (repeatedWords > 2) {
+  if (repeatedWords > AUDIT_THRESHOLDS.repeatedWordsLimit) {
     reasons.push('repeated_words');
-    spamPoints += 0.20;
+    spamPoints += AUDIT_THRESHOLDS.repeatedWordsPenalty;
   }
 
   // 4. Too Short Check
-  if (wordCount > 0 && wordCount < 5) {
+  if (wordCount > 0 && wordCount < AUDIT_THRESHOLDS.shortReviewLimit) {
     reasons.push('very_short_review');
-    spamPoints += 0.15;
+    spamPoints += AUDIT_THRESHOLDS.shortReviewPenalty;
   }
 
   // 5. Spam Keywords Matching
@@ -98,20 +98,20 @@ export function auditSingleReview(review, allReviews, velocitySpikeDates) {
   const matchedKeywords = SPAM_KEYWORDS.filter(kw => cleanText.includes(kw));
   if (matchedKeywords.length > 0) {
     reasons.push('spam_keywords_detected');
-    spamPoints += 0.30;
+    spamPoints += AUDIT_THRESHOLDS.spamKeywordsPenalty;
   }
 
   // 6. Review Velocity Spike Check
   const dateKey = new Date(review.date).toISOString().split('T')[0];
   if (velocitySpikeDates.has(dateKey)) {
     reasons.push('velocity_spike_anomaly');
-    spamPoints += 0.25;
+    spamPoints += AUDIT_THRESHOLDS.velocitySpikePenalty;
   }
 
   // 7. Rating Anomaly (Verified purchase status combined with 5-star rating)
   if (review.rating === 5 && !review.verified) {
     reasons.push('unverified_5_star');
-    spamPoints += 0.10;
+    spamPoints += AUDIT_THRESHOLDS.unverifiedPenalty;
   }
 
   const spamScore = Number(Math.max(0.0, Math.min(1.0, spamPoints)).toFixed(3));
@@ -158,7 +158,7 @@ export async function auditProductReviews(reviews) {
   const velocitySpikeDates = new Set();
   for (const k in dateCounts) {
     // Flag dates where there are at least 5 reviews and represents > 30% of total reviews
-    if (dateCounts[k] >= 5 && (dateCounts[k] / totalReviewsCount) > 0.30) {
+    if (dateCounts[k] >= AUDIT_THRESHOLDS.velocitySpikeCount && (dateCounts[k] / totalReviewsCount) > AUDIT_THRESHOLDS.velocitySpikeRatio) {
       velocitySpikeDates.add(k);
     }
   }
@@ -218,7 +218,7 @@ export async function auditProductReviews(reviews) {
     genuineRating,
     validReviewsCount: validCount,
     totalReviewsCount,
-    isLowReviewCount: totalReviewsCount < 10,
+    isLowReviewCount: totalReviewsCount < AUDIT_THRESHOLDS.minSampleForFraud,
     auditedReviews
   };
 }

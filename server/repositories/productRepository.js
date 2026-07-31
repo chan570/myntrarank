@@ -5,8 +5,28 @@ export class ProductRepository {
     return Product.findOne({ id }).lean();
   }
 
-  async findAll() {
-    return Product.find().lean();
+  // Encapsulates paginated, filtered, and sorted database queries
+  async findPaged({ page = 1, limit = 10, category = 'All', sortBy = 'title', sortOrder = 'asc' }) {
+    const query = {};
+    if (category && category !== 'All') {
+      query.category = category;
+    }
+
+    const sort = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+    const skip = (page - 1) * limit;
+
+    const [items, total] = await Promise.all([
+      Product.find(query).sort(sort).skip(skip).limit(limit).lean(),
+      Product.countDocuments(query)
+    ]);
+
+    return {
+      items,
+      total,
+      page,
+      limit,
+      totalPages: Math.ceil(total / limit)
+    };
   }
 
   async count() {

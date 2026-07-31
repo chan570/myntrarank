@@ -6,6 +6,9 @@ import { connectDB } from './config/db.js';
 import { seedDatabase } from './services/seedService.js';
 import apiRoutes from './routes/api.js';
 import { errorHandler } from './middlewares/errorHandler.js';
+import { logger } from './utils/logger.js';
+import swaggerUi from 'swagger-ui-express';
+import { swaggerSpec } from './config/swaggerSpec.js';
 
 const app = express();
 
@@ -20,6 +23,15 @@ app.use(cors({
 }));
 
 app.use(express.json());
+
+// Request logging middleware
+app.use((req, res, next) => {
+  logger.info(`${req.method} ${req.url} - IP: ${req.ip}`);
+  next();
+});
+
+// API Documentation UI
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerSpec));
 
 // API Routes
 app.use('/api', apiRoutes);
@@ -39,30 +51,52 @@ app.use(errorHandler);
 
 // Boot Sequence
 async function startServer() {
-  console.log(`\n======================================================`);
-  console.log(`🚀 STARTING TRUSTRANK BACKEND MICROSERVICE GATEWAY`);
-  console.log(`======================================================\n`);
+  logger.info('STARTING TRUSTRANK BACKEND MICROSERVICE GATEWAY...');
 
   // Start listening on port immediately to guarantee instant Render port binding and deployment success
-  app.listen(config.port, async () => {
-    console.log(`\n🌐 Express REST API Server running live at: http://localhost:${config.port}`);
-    console.log(`📡 Cloud API Endpoints Active:`);
-    console.log(`   - Search API:  http://localhost:${config.port}/api/v1/search?q=shirt`);
-    console.log(`   - Stats API:   http://localhost:${config.port}/api/v1/stats`);
-    console.log(`======================================================\n`);
+  const server = app.listen(config.port, async () => {
+    logger.info(`Express REST API Server running live at: http://localhost:${config.port}`);
+    logger.info(`Cloud API Endpoints Active:`);
+    logger.info(`   - Search API:  http://localhost:${config.port}/api/v1/search?q=shirt`);
+    logger.info(`   - Stats API:   http://localhost:${config.port}/api/v1/stats`);
 
     // Run connection and seeding asynchronously in the background
     try {
       const isConnected = await connectDB();
       seedDatabase(!isConnected).then(() => {
-        console.log(`📦 Seeding and OpenSearch initialization completed!`);
+        logger.info('Seeding and OpenSearch initialization completed!');
       }).catch(err => {
-        console.warn(`⚠️ Seeding failure caught in background: ${err.message}`);
+        logger.warn(`Seeding failure caught in background: ${err.message}`);
       });
     } catch (err) {
-      console.warn(`⚠️ DB Boot failure caught in background: ${err.message}`);
+      logger.warn(`DB Boot failure caught in background: ${err.message}`);
     }
   });
+
+  // Graceful Shutdown Handler
+  const gracefulShutdown = async (signal) => {
+    logger.info(`Received ${signal}. Shutting down server gracefully...`);
+    server.close(async () => {
+      logger.info('HTTP server closed.');
+      try {
+        const mongoose = await import('mongoose');
+        await mongoose.default.connection.close();
+        logger.info('Database connection closed.');
+        process.exit(0);
+      } catch (err) {
+        logger.error(`Error closing database connection: ${err.message}`);
+        process.exit(1);
+      }
+    });
+
+    setTimeout(() => {
+      logger.error('Forced shutdown due to timeout.');
+      process.exit(1);
+    }, 10000);
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 }
 
 startServer();

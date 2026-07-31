@@ -20,3 +20,20 @@ export const RANKING_WEIGHTS = {
 };
 
 export const TIME_DECAY_HALF_LIFE_DAYS = 180; // Configurable half-life
+
+export const AUDIT_THRESHOLDS = {
+  duplicatePenalty: 0.50,
+  ttrWordLimit: 6,
+  ttrThreshold: 0.65,
+  ttrPenalty: 0.25,
+  repeatedWordsLimit: 2,
+  repeatedWordsPenalty: 0.20,
+  shortReviewLimit: 5,
+  shortReviewPenalty: 0.15,
+  spamKeywordsPenalty: 0.30,
+  velocitySpikeCount: 5,
+  velocitySpikeRatio: 0.30,
+  velocitySpikePenalty: 0.25,
+  unverifiedPenalty: 0.10,
+  minSampleForFraud: 10
+};
