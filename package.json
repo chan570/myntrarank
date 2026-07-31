@@ -9,6 +9,7 @@
     "spark": "python server/spark/spark_audit_job.py",
     "start": "node server/server.js",
     "build": "vite build",
+    "train": "node server/scripts/trainClassifier.js",
     "lint": "eslint .",
     "preview": "vite preview"
   },
