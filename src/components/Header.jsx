@@ -10,7 +10,8 @@ export const Header = ({
   wishlistItems,
   bagItems,
   setToastMessage,
-  resetToHome
+  resetToHome,
+  isLoading
 }) => {
   const categories = ["All", "Men's Apparel", "Women's Apparel", "Footwear", "Accessories", "Kids' Wear"];
 
@@ -51,7 +52,7 @@ export const Header = ({
 
       {/* Search Bar */}
       <div className="search-bar-container">
-        <SearchIcon />
+        {isLoading ? <div className="search-bar-spinner"></div> : <SearchIcon />}
         <input 
           type="text" 
           className="search-input" 

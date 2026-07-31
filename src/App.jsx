@@ -29,6 +29,7 @@ export function App() {
   const [selectedProduct, setSelectedProduct] = useState(null);
   const [selectedSize, setSelectedSize] = useState("M");
   const [searchResults, setSearchResults] = useState([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   // Scroll Memory & E-Commerce Bag/Wishlist State
   const scrollYPos = useRef(0);
@@ -97,6 +98,7 @@ export function App() {
   // Execute Pure Backend Search via Express REST API & Amazon OpenSearch
   useEffect(() => {
     let isMounted = true;
+    setIsLoading(true);
     apiClient.executeQuery(searchQuery, {
       auth: 0.35,
       sent: 0.20,
@@ -129,6 +131,7 @@ export function App() {
           });
           setSearchResults(clientData.results || []);
         }
+        setIsLoading(false);
       }
     }).catch(err => {
       if (isMounted) {
@@ -146,6 +149,7 @@ export function App() {
           categoryFilter: activeCategory
         });
         setSearchResults(clientData.results || []);
+        setIsLoading(false);
       }
     });
 
@@ -218,6 +222,7 @@ export function App() {
         bagItems={bagItems}
         setToastMessage={setToastMessage}
         resetToHome={resetToHome}
+        isLoading={isLoading}
       />
 
       {/* Product Detail Page View vs Catalog Search Grid View */}
@@ -272,17 +277,40 @@ export function App() {
                 </div>
               </div>
 
-              <div className="product-grid">
-                {finalSortedProducts.map((product, index) => (
-                  <ProductCard
-                    key={product.id}
-                    product={product}
-                    index={index}
-                    isFake={checkIsFakeProduct(product)}
-                    openProductDetail={openProductDetail}
-                  />
-                ))}
-              </div>
+              {isLoading ? (
+                <div className="search-loading-container">
+                  <div className="premium-glow-spinner"></div>
+                  <p className="loading-subtitle">Auditing and ranking products with TrustRank...</p>
+                  
+                  <div className="skeleton-grid">
+                    {[1, 2, 3, 4].map(n => (
+                      <div key={n} className="skeleton-card">
+                        <div className="skeleton-image" />
+                        <div className="skeleton-line short" />
+                        <div className="skeleton-line long" />
+                        <div className="skeleton-line medium" />
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : finalSortedProducts.length === 0 ? (
+                <div className="empty-results-state" style={{ padding: '40px', textAlign: 'center', color: 'var(--myntra-secondary)', width: '100%' }}>
+                  <h3>No products found</h3>
+                  <p>Try clearing some filters or searching for another query.</p>
+                </div>
+              ) : (
+                <div className="product-grid">
+                  {finalSortedProducts.map((product, index) => (
+                    <ProductCard
+                      key={product.id}
+                      product={product}
+                      index={index}
+                      isFake={checkIsFakeProduct(product)}
+                      openProductDetail={openProductDetail}
+                    />
+                  ))}
+                </div>
+              )}
             </main>
           </div>
         </>
