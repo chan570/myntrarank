@@ -7,7 +7,7 @@ export const swaggerSpec = {
   },
   servers: [
     {
-      url: 'http://localhost:5000/api/v1',
+      url: 'http://localhost:5000/api',
       description: 'Local Development Server'
     }
   ],
@@ -161,17 +161,6 @@ export const swaggerSpec = {
         responses: {
           '200': {
             description: 'Bot reviews injected successfully'
-          }
-        }
-      }
-    },
-    '/stats': {
-      get: {
-        summary: 'Get telemetry details',
-        description: 'Returns indices document counts, DB connection status, and server states.',
-        responses: {
-          '200': {
-            description: 'Telemetry logs'
           }
         }
       }

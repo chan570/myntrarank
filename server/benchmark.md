@@ -31,4 +31,4 @@ This report outlines the latency, throughput, and memory performance benchmarks 
 
 ## 3. Findings & Performance Tuning
 * **Pre-loading ML Models**: By loading `model.pkl` and `tfidf.pkl` once during FastAPI microservice boot (instead of lazily reloading on each request), HTTP inference latency was cut by $98.5\%$.
-* **VADER Fallback Latency**: Running the synchronous VADER lexicon backup executes in less than $0.25$ ms, ensuring zero-latency query paths when the ML microservice is unreachable.
+* **ML Inference Reliability**: The FastAPI microservice implements exponential backoff retry logic (3 attempts, 200 ms initial delay). If the ML service is unreachable after all retries, the audit engine surfaces an `MLServiceError` rather than silently degrading to an uncontrolled fallback, preserving result integrity.

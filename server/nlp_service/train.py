@@ -181,11 +181,22 @@ DATASET = [
 def train_sentiment_model():
     print("[TRAIN] Starting TrustRank Sentiment Classifier Training...")
     
-    # Create DataFrame
-    df = pd.DataFrame(DATASET, columns=['text', 'sentiment'])
+    # Load Real DataFrame
+    csv_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '../../data/Womens Clothing E-Commerce Reviews.csv')
+    print(f"[TRAIN] Loading dataset from {csv_path}")
+    df = pd.read_csv(csv_path)
+    
+    # Drop rows with missing text or labels
+    df = df.dropna(subset=['Review Text', 'Recommended IND'])
+    
+    # Map columns to what the script expects
+    df = df.rename(columns={'Review Text': 'text', 'Recommended IND': 'sentiment'})
+    
+    # Sample down if it's too large for local training (optional, but let's keep all or at least 10000)
+    # Using the full dataset of ~23k is fine for Logistic Regression.
     
     # Preprocess texts
-    print("[TRAIN] Preprocessing dataset text reviews...")
+    print(f"[TRAIN] Preprocessing {len(df)} dataset text reviews...")
     df['cleaned_text'] = df['text'].apply(clean_and_preprocess)
     
     # Split dataset

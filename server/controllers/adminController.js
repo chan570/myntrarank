@@ -14,7 +14,7 @@ export class AdminController {
       let auditedCount = 0;
       const logs = [];
 
-      logs.push(`[${new Date().toISOString()}] SPARK_BATCH_INIT: Sweeping products for dirty records...`);
+      logs.push(`[${new Date().toISOString()}] AUDIT_BATCH_INIT: Sweeping products for dirty records...`);
 
       const allDocs = await this.searchService.getAllDocuments();
       for (const doc of allDocs) {
@@ -38,11 +38,11 @@ export class AdminController {
       }
 
       const durationMs = Number((performance.now() - startTime).toFixed(2));
-      logs.push(`[${new Date().toISOString()}] SPARK_BATCH_COMPLETE: Audited ${auditedCount} product documents in ${durationMs}ms.`);
+      logs.push(`[${new Date().toISOString()}] AUDIT_BATCH_COMPLETE: Audited ${auditedCount} product documents in ${durationMs}ms.`);
 
       res.json({
         status: 'success',
-        cloudWorker: 'Apache Spark on AWS EMR',
+        auditWorker: 'TF-IDF + Logistic Regression ML Engine',
         data: {
           auditedCount,
           durationMs,

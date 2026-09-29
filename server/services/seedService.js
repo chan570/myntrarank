@@ -3,13 +3,23 @@ import { Product } from '../models/Product.js';
 import { Review } from '../models/Review.js';
 import { auditProductReviews } from './auditEngine.js';
 import { openSearchService } from './openSearchEngine.js';
-import { runSparkAuditJob } from './sparkRunner.js';
 
 export async function seedDatabase(isMemoryFallback = false) {
   console.log(`🚀 Initializing TrustRank Database Seeder (Generating 1,100 products & 27,000+ reviews)...`);
 
   const mockData = generateProducts();
-  const auditedProducts = await runSparkAuditJob(mockData);
+
+  // Audit products directly using the Node.js audit engine
+  console.log(`⚡ Running audit pipeline on ${mockData.length} products (Sequentially to prevent ML API overload)...`);
+  const auditedProducts = [];
+  let i = 0;
+  for (const p of mockData) {
+    const metrics = await auditProductReviews(p.reviews || []);
+    auditedProducts.push({ ...p, auditedMetrics: metrics, auditedBy: 'TF-IDF + Logistic Regression ML Engine' });
+    i++;
+    if (i % 50 === 0) console.log(`   ...audited ${i}/${mockData.length} products`);
+  }
+  console.log(`✅ Audit complete! ${auditedProducts.length} products processed.`);
   let dbProducts = [];
 
   if (!isMemoryFallback) {

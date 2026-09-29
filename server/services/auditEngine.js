@@ -188,9 +188,19 @@ export async function auditProductReviews(reviews) {
   let verifiedCount = 0;
   let richnessSum = 0;
 
-  for (const r of validReviews) {
+  let sentimentScores = [];
+  try {
+    const texts = validReviews.map(r => r.text || '');
+    const { analyzeNLPSentimentBatch } = await import('./nlpEngine.js');
+    sentimentScores = await analyzeNLPSentimentBatch(texts);
+  } catch(e) {
+    console.warn("Batch failed, using default sentiments");
+  }
+
+  for (let idx = 0; idx < validReviews.length; idx++) {
+    const r = validReviews[idx];
     const decay = calculateTimeDecay(r.date);
-    const sent = await analyzeNLPSentiment(r.text);
+    const sent = sentimentScores[idx] !== undefined ? sentimentScores[idx] : 0.5;
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 

@@ -1,13 +1,11 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { apiClient } from './services/apiClient';
-import { offlinePipeline } from './services/offlinePipeline';
-import { queryEngine } from './services/queryEngine';
-import { mockDatabase } from './services/mockDatabase';
 import { Header } from './components/Header';
 import { SidebarFilters } from './components/SidebarFilters';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetail } from './components/ProductDetail';
 import './index.css';
+
 /*This file performs 8 major tasks:
 
 Maintains all application state.
@@ -30,6 +28,7 @@ export function App() {
   const [selectedSize, setSelectedSize] = useState("M");
   const [searchResults, setSearchResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
+  const [backendError, setBackendError] = useState(null);
 
   // Scroll Memory & E-Commerce Bag/Wishlist State
   const scrollYPos = useRef(0);
@@ -86,19 +85,12 @@ export function App() {
     }
   };
 
-  // Initialize product index on mount for client-side search fallback
-  useEffect(() => {
-    try {
-      offlinePipeline.runBatchJob(mockDatabase.getAll());
-    } catch (e) {
-      console.error("Failed to initialize offline search index:", e);
-    }
-  }, []);
-
-  // Execute Pure Backend Search via Express REST API & Amazon OpenSearch
+  // Execute Backend Search via Express REST API & Amazon OpenSearch
   useEffect(() => {
     let isMounted = true;
     setIsLoading(true);
+    setBackendError(null);
+
     apiClient.executeQuery(searchQuery, {
       auth: 0.35,
       sent: 0.20,
@@ -112,43 +104,14 @@ export function App() {
       categoryFilter: activeCategory
     }).then(data => {
       if (isMounted) {
-        if (data && Array.isArray(data.results) && data.results.length > 0) {
-          setSearchResults(data.results);
-        } else {
-          // If backend returned nothing or empty, run in-memory client search engine as fallback
-          console.warn("Express API Offline/Empty: Falling back to in-memory search client...");
-          const clientData = queryEngine.searchAndScore(searchQuery, {
-            weightAuthenticity: 0.35,
-            weightSentiment: 0.20,
-            weightVerified: 0.15,
-            weightRichness: 0.10,
-            weightRecency: 0.10,
-            weightRating: 0.10,
-            removeSuspicious,
-            filterLowReviews,
-            minRating: minRatingFilter,
-            categoryFilter: activeCategory
-          });
-          setSearchResults(clientData.results || []);
-        }
+        setSearchResults(Array.isArray(data.results) ? data.results : []);
         setIsLoading(false);
       }
     }).catch(err => {
       if (isMounted) {
-        console.warn("Express API Offline: Falling back to in-memory search client...");
-        const clientData = queryEngine.searchAndScore(searchQuery, {
-          weightAuthenticity: 0.35,
-          weightSentiment: 0.20,
-          weightVerified: 0.15,
-          weightRichness: 0.10,
-          weightRecency: 0.10,
-          weightRating: 0.10,
-          removeSuspicious,
-          filterLowReviews,
-          minRating: minRatingFilter,
-          categoryFilter: activeCategory
-        });
-        setSearchResults(clientData.results || []);
+        console.error("Backend unavailable:", err.message);
+        setSearchResults([]);
+        setBackendError("Unable to reach the TrustRank backend. Please ensure the server is running.");
         setIsLoading(false);
       }
     });
@@ -158,14 +121,14 @@ export function App() {
 
   const checkIsFakeProduct = (product) => {
     if (!product) return false;
-    const authScore = product.authenticityScore !== undefined 
-      ? product.authenticityScore 
+    const authScore = product.authenticityScore !== undefined
+      ? product.authenticityScore
       : (product.auditedMetrics?.authenticityScore !== undefined ? product.auditedMetrics.authenticityScore : 1.0);
     return Boolean(
-      product.isSuspicious || 
-      product.isFlaggedAsFake || 
-      product.isFlagged || 
-      authScore < 0.60 || 
+      product.isSuspicious ||
+      product.isFlaggedAsFake ||
+      product.isFlagged ||
+      authScore < 0.60 ||
       (product.anomalyType && product.anomalyType !== "low_review_count")
     );
   };
@@ -264,8 +227,8 @@ export function App() {
 
                 <div className="sort-container">
                   <span style={{ color: 'var(--myntra-secondary)', fontSize: '13px' }}>Sort by</span>
-                  <select 
-                    value={sortOption} 
+                  <select
+                    value={sortOption}
                     onChange={(e) => setSortOption(e.target.value)}
                     style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--myntra-border)', fontWeight: '600', cursor: 'pointer' }}
                   >
@@ -281,7 +244,7 @@ export function App() {
                 <div className="search-loading-container">
                   <div className="premium-glow-spinner"></div>
                   <p className="loading-subtitle">Auditing and ranking products with TrustRank...</p>
-                  
+
                   <div className="skeleton-grid">
                     {[1, 2, 3, 4].map(n => (
                       <div key={n} className="skeleton-card">
@@ -292,6 +255,21 @@ export function App() {
                       </div>
                     ))}
                   </div>
+                </div>
+              ) : backendError ? (
+                <div className="empty-results-state" style={{ padding: '48px 40px', textAlign: 'center', color: 'var(--myntra-secondary)', width: '100%' }}>
+                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
+                  <h3 style={{ color: 'var(--myntra-primary)', marginBottom: '8px' }}>Backend Unavailable</h3>
+                  <p style={{ maxWidth: '420px', margin: '0 auto 20px' }}>{backendError}</p>
+                  <button
+                    onClick={() => {
+                      setBackendError(null);
+                      setSearchQuery(q => q);
+                    }}
+                    style={{ padding: '10px 24px', borderRadius: '6px', background: 'var(--myntra-accent)', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}
+                  >
+                    Retry
+                  </button>
                 </div>
               ) : finalSortedProducts.length === 0 ? (
                 <div className="empty-results-state" style={{ padding: '40px', textAlign: 'center', color: 'var(--myntra-secondary)', width: '100%' }}>

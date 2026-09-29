@@ -42,7 +42,7 @@ app.get('/', (req, res) => {
     status: 'online',
     service: 'TrustRank Enterprise Microservice Gateway',
     version: '1.0.0',
-    documentation: 'GET /api/v1/search, POST /api/v1/reviews, POST /api/v1/admin/audit'
+    documentation: 'GET /api/search, POST /api/reviews, POST /api/admin/audit'
   });
 });
 
@@ -57,8 +57,8 @@ async function startServer() {
   const server = app.listen(config.port, async () => {
     logger.info(`Express REST API Server running live at: http://localhost:${config.port}`);
     logger.info(`Cloud API Endpoints Active:`);
-    logger.info(`   - Search API:  http://localhost:${config.port}/api/v1/search?q=shirt`);
-    logger.info(`   - Stats API:   http://localhost:${config.port}/api/v1/stats`);
+    logger.info(`   - Search API:  http://localhost:${config.port}/api/search?q=shirt`);
+    logger.info(`   - Admin Audit: http://localhost:${config.port}/api/admin/audit`);
 
     // Run connection and seeding asynchronously in the background
     try {

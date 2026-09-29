@@ -45,7 +45,7 @@ Controller ──► Service ──► Repository ──► Database (MongoDB / 
 │   ├── middlewares/        # Security headers (Helmet), Rate limits, Unified error catching
 │   ├── models/             # Mongoose schemas (Product, Review)
 │   ├── repositories/       # Abstraction layer for Mongoose database interactions (Encapsulates Pagination)
-│   ├── routes/             # Versioned express routing mapping (/api/v1/*)
+│   ├── routes/             # Express routing (/api/*)
 │   ├── services/           # Auditing and Search scoring engines
 │   │   ├── auditEngine.js  # Deduplication, Spikes, and Type-Token Ratio spam checks
 │   │   ├── openSearchEngine.js # DSL Query and Painless script execution
@@ -134,7 +134,7 @@ For complete details, view the [Benchmark Report](file:///c:/Users/kaurc/Downloa
 Complete Swagger/OpenAPI documentation is available live at **`/api/docs`** on the gateway.
 
 ### Search Endpoint
-`GET /api/v1/search`
+`GET /api/search`
 * **Query Params**:
   * `q` (string): Search query.
   * `category` (string): Filter by category.
@@ -166,7 +166,7 @@ Complete Swagger/OpenAPI documentation is available live at **`/api/docs`** on t
   ```
 
 ### Batch Prediction Endpoint (FastAPI Microservice)
-`POST /api/v1/predict/batch`
+`POST /api/predict/batch`
 * **Request Body**:
   ```json
   {

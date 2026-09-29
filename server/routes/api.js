@@ -1,12 +1,24 @@
 import express from 'express';
-import v1Router from './api.v1.js';
+import { searchController } from '../controllers/searchController.js';
+import { reviewController } from '../controllers/reviewController.js';
+import { adminController } from '../controllers/adminController.js';
+import { validateReviewInput } from '../validators/reviewValidator.js';
+import { apiRateLimiter } from '../middlewares/rateLimiter.js';
 
 const router = express.Router();
 
-// Mount Version 1 APIs
-router.use('/v1', v1Router);
+// Apply rate limiting to all API endpoints
+router.use(apiRateLimiter);
 
-// Maintain Legacy Routing (Backward Compatibility)
-router.use('/', v1Router);
+// Search
+router.get('/search', searchController.search);
+router.get('/search/autocomplete', searchController.autocomplete);
+
+// Reviews
+router.post('/reviews', validateReviewInput, reviewController.createReview);
+
+// Admin
+router.post('/admin/audit', adminController.runAudit);
+router.post('/admin/inject-bot-attack', adminController.injectBotAttack);
 
 export default router;

@@ -69,4 +69,44 @@ export async function analyzeNLPSentiment(text) {
   }
 }
 
+export async function analyzeNLPSentimentBatch(texts) {
+  if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
+
+  const url = `${config.nlpServiceUrl}/predict/batch`;
+  const reviews = texts.map((t, idx) => ({ id: String(idx), text: t }));
+  
+  let attempt = 1;
+  let delay = INITIAL_BACKOFF_MS;
+
+  while (attempt <= MAX_RETRIES) {
+    try {
+      logger.debug(`[NLP Client] Fetching batch sentiment for ${texts.length} items (Attempt ${attempt}/${MAX_RETRIES})...`);
+      const response = await fetchWithTimeout(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reviews })
+      }, 30000); // 30 seconds for batch
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+      }
+
+      const data = await response.json();
+      if (data && data.status === 'success' && data.predictions) {
+        return data.predictions.map(p => p.score);
+      }
+      throw new Error("Malformed response format received from ML service.");
+    } catch (err) {
+      logger.warn(`[NLP Client] Batch Attempt ${attempt} failed: ${err.message}`);
+      if (attempt === MAX_RETRIES) {
+        throw new MLServiceError(`FastAPI ML service unreachable after ${MAX_RETRIES} attempts. Details: ${err.message}`);
+      }
+      
+      await new Promise(resolve => setTimeout(resolve, delay));
+      delay *= 2;
+      attempt++;
+    }
+  }
+}
+
 export default { analyzeNLPSentiment };

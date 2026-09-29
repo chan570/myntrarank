@@ -1,7 +1,6 @@
 /**
  * TRUSTRANK FRONTEND API CLIENT
  * Connects React Frontend to Express REST API Gateway (http://localhost:5000/api)
- * Fallbacks gracefully to in-memory mode if Express server is offline.
  */
 
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
@@ -29,8 +28,7 @@ export const apiClient = {
       const json = await res.json();
       return json.data;
     } catch (err) {
-      console.error(`Backend Express API Search Error: ${err.message}`);
-      return { results: [], totalMatches: 0, executionTimeMs: 0 };
+      throw new Error(`Backend Express API Search Error: ${err.message}`);
     }
   },
 
@@ -49,8 +47,8 @@ export const apiClient = {
     }
   },
 
-  // Trigger Spark Audit Job
-  async triggerSparkAudit() {
+  // Trigger Audit Batch Job
+  async triggerAudit() {
     try {
       const res = await fetch(`${API_BASE_URL}/admin/audit`, { method: 'POST' });
       return await res.json();
@@ -71,16 +69,5 @@ export const apiClient = {
     } catch (err) {
       return null;
     }
-  },
-
-  // Get Telemetry Status
-  async getSystemStats() {
-    try {
-      const res = await fetch(`${API_BASE_URL}/stats`);
-      return await res.json();
-    } catch (err) {
-      return null;
-    }
   }
 };
-/*apiClient.js is a service layer that abstracts all communication between the React frontend and the Express backend. Instead of calling fetch() throughout the application, every HTTP request is centralized here. It exposes methods for searching products, submitting reviews, triggering the audit pipeline, simulating bot attacks, and retrieving system statistics. Each method handles network requests, parses JSON responses, and gracefully handles failures so the frontend can switch to offline behavior when the backend is unavailable. */

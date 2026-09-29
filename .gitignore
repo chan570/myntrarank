@@ -23,3 +23,9 @@ dist-ssr
 *.sln
 *.sw?
 .env
+
+opensearch-2.11.0/
+data/
+*.pkl
+*.bak
+

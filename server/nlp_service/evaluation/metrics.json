@@ -1,23 +1,23 @@
 {
-    "accuracy": 1.0,
-    "precision": 1.0,
-    "recall": 1.0,
-    "f1_score": 1.0,
+    "accuracy": 0.8784667019961138,
+    "precision": 0.8875147232037691,
+    "recall": 0.9751941328731665,
+    "f1_score": 0.9292908530318602,
     "five_fold_cv_scores": [
-        1.0,
-        1.0,
-        1.0,
-        1.0,
-        1.0
+        0.8801059836608522,
+        0.8783127208480566,
+        0.8783127208480566,
+        0.8769876325088339,
+        0.8736749116607774
     ],
-    "mean_cv_score": 1.0,
-    "vocabulary_size": 618,
+    "mean_cv_score": 0.8774787939053154,
+    "vocabulary_size": 62110,
     "classes": [
         "NEGATIVE",
         "POSITIVE"
     ],
-    "training_date": "2026-07-31 16:58:45",
-    "dataset_size": 300,
-    "train_size": 225,
-    "test_size": 75
+    "training_date": "2026-09-29 13:37:46",
+    "dataset_size": 22641,
+    "train_size": 16980,
+    "test_size": 5661
 }
