@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 720" role="img" aria-label="Clothing dataset item placeholder">
+  <rect width="600" height="720" fill="#f5f2f6"/>
+  <path d="M205 180l-75 50-45 140 95 35 25-62v195h180V343l25 62 95-35-45-140-75-50-55 45h-70z" fill="#ded5e2" stroke="#8b718f" stroke-width="12" stroke-linejoin="round"/>
+  <text x="300" y="620" text-anchor="middle" font-family="Arial,sans-serif" font-size="25" fill="#55485a">Dataset item · no image provided</text>
+</svg>

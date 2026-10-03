@@ -1,242 +1,128 @@
-# TrustRank: Enterprise Product Trust & Ranking Engine
+# TrustRank
 
-An enterprise-grade Product Trust and Ranking Engine that prevents fraud, calculates multi-factor product authenticity scores, and ranks items based on genuine buyer feedback rather than unverified star ratings. Powered by an Express REST API Gateway and a dedicated Python FastAPI Machine Learning microservice.
+TrustRank is a review-risk and product-ranking demo. Users can register, sign in, and submit one review per account for a product. The API saves the review and recalculates the product score. Search rankings are snapshots: an existing results list stays fixed until the user searches or refreshes again.
 
----
+## What this demo does and does not claim
 
-## 1. System Architecture
+- Catalog products and historical seed reviews come only from the CC0 Women’s Clothing E-Commerce Reviews dataset. Catalog products are held out by `Clothing ID` from both transformer training and model evaluation. User-submitted reviews are separate demo inputs and are not silently added to the training set.
+- Submitted reviews are always unverified. There is no checkout/order integration to prove purchase.
+- Demo accounts use scrypt password hashes and seven-day HttpOnly session cookies. There is no email verification, password reset, or account recovery.
+- Review-risk rules are heuristics and may flag harmless behavior. They are not proof of fraud.
+- Sentiment uses a pretrained three-class transformer. It predicts polarity only; it does not detect fake reviews.
+- The default checkpoint was trained on English social-media text, so it is a starting model, not proven clothing-review performance. Its model card lists CC-BY-4.0 and English suitability; retain attribution and validate it on product reviews before relying on the scores. [Model card](https://huggingface.co/cardiffnlp/twitter-roberta-base-sentiment-latest)
+- The source has no prices, product photos, reviewer identities, purchase verification, or review dates. The interface labels or omits those fields rather than inventing them. No live marketplace feed is connected.
 
-```mermaid
-graph TD
-    UI[React Frontend Client] -->|HTTP REST| API[Express API Gateway]
-    API -->|CORS / Rate Limiting / Helmet| API
-    API -->|Swagger UI /api/docs| API
-    
-    API -->|REST API POST /predict| NLP[FastAPI NLP Service]
-    NLP -->|Loads once on boot| Model[Logistic Regression + TF-IDF Vectorizer]
-    
-    API -->|Services / Repositories| DB[(MongoDB Atlas Cloud)]
-    API -->|Services / Painless Scoring DSL| OS[(Amazon OpenSearch Cluster)]
-    
-    style UI fill:#f9f,stroke:#333,stroke-width:2px
-    style API fill:#bbf,stroke:#333,stroke-width:2px
-    style NLP fill:#bfb,stroke:#333,stroke-width:2px
-    style DB fill:#ffb,stroke:#333,stroke-width:2px
-    style OS fill:#fbb,stroke:#333,stroke-width:2px
+## Main review flow
+
+```text
+Product page form
+  -> POST /api/reviews (validated, idempotency key)
+  -> load product from OpenSearch
+  -> append one account-owned, unverified review and rerun risk scoring + uncached sentiment inference
+  -> write reviews and aggregate metrics into the product document
+  -> return updated metrics
+  -> show success while each existing search snapshot stays fixed
+  -> the next search or explicit refresh requests the current ordering
 ```
 
-### Dependency Flow (Strict Layered Architecture)
-```
-Controller ──► Service ──► Repository ──► Database (MongoDB / OpenSearch)
-```
-* **No Direct Schema Access**: Controllers delegate all queries to services. Business logic lives strictly in services. Data querying is encapsulated in repositories.
-* **Graceful Shutdown**: Node processes capture `SIGINT` and `SIGTERM` signals to close database connections and Express handlers cleanly.
+OpenSearch stores the demo catalog, account records, sessions, reviews, and score aggregates. A per-product queue serializes simultaneous review writes inside one API process; version-checked writes protect against concurrent updates from another process. Review sentiment predictions are cached on each review, so subsequent submissions only need inference for new text. This makes a single-process pilot with 20 users more predictable. A multi-instance production service should move account and review writes to a transactional database with uniqueness constraints, then update OpenSearch as a search projection. The bundled local cluster is for development only.
 
----
+## Services
 
-## 2. Directory Structure
+- React + Vite frontend
+- Express API
+- OpenSearch index `myntrarank_products`
+- OpenSearch indexes `trustrank_users` and `trustrank_sessions` for demo account sessions
+- Python FastAPI sentiment service using `cardiffnlp/twitter-roberta-base-sentiment-latest` by default
 
-```
-├── public/                 # Static web assets
-├── server/                 # Express Backend REST API Gateway
-│   ├── config/             # Connection configurations (DB, Env validation, Swagger specs)
-│   ├── constants/          # Mathematical ranking weights & audit thresholds
-│   ├── controllers/        # Express handlers (Zero business logic)
-│   ├── middlewares/        # Security headers (Helmet), Rate limits, Unified error catching
-│   ├── models/             # Mongoose schemas (Product, Review)
-│   ├── repositories/       # Abstraction layer for Mongoose database interactions (Encapsulates Pagination)
-│   ├── routes/             # Express routing (/api/*)
-│   ├── services/           # Auditing and Search scoring engines
-│   │   ├── auditEngine.js  # Deduplication, Spikes, and Type-Token Ratio spam checks
-│   │   ├── openSearchEngine.js # DSL Query and Painless script execution
-│   │   └── seedService.js  # Seeder database routines
-│   ├── utils/              # Structured JSON Logger, Custom SDE Error hierarchies
-│   ├── nlp_service/        # Python FastAPI ML NLP Microservice
-│   │   ├── evaluation/     # Metrics, confusion matrix plots, feature importance exports
-│   │   ├── main.py         # FastAPI prediction API
-│   │   ├── train.py        # Tokenization, Lemmatization, Logistic Regression training script
-│   │   ├── requirements.txt # Python package declarations
-│   │   ├── model.pkl       # Serialized classifier model
-│   │   └── tfidf.pkl       # Serialized TF-IDF vectorizer
-│   ├── benchmark.md        # Telemetry metrics report
-│   └── server.js           # Express main server script
-├── src/                    # React frontend client
-├── tests/                  # Backend unit & integration test suite
-└── package.json            # Node.js project setup and execution script mappings
-```
+The service loads the transformer once at process start. First startup downloads model files, so the host needs outbound access to Hugging Face unless the model is pre-cached. CPU inference is supported; GPU is used when available. For mixed Hindi-English reviews, select and evaluate a multilingual model before claiming support.
 
----
+## Local setup
 
-## 3. Mathematical Foundations & Algorithms
+Requirements: Node.js compatible with the lockfile, Python 3.10+, an OpenSearch 2.x endpoint, outbound access to Hugging Face for the first model download, and enough RAM for the transformer model (CPU use is slower). The updated source ZIP does not include an OpenSearch distribution. If you still have the original `opensearch-2.11.0` folder, start it with `.\opensearch-2.11.0\bin\opensearch.bat`; otherwise install/run a local OpenSearch 2.x instance separately.
 
-### A. TrustRank Audit Score Formulation
-The TrustRank score evaluates reviews on a $0.0$ to $1.0$ scale. It is calculated as a weighted sum of six distinct dimensions:
+1. Start a local OpenSearch endpoint that accepts HTTP without authentication, then confirm it is available at `http://localhost:9200`. The bundled development configuration disables the security plugin and is suitable only for local use. The current API client does not configure TLS or credentials for a secured/managed cluster.
+2. In the project root, create a local Python environment and install the NLP requirements:
 
-$$T = w_{\text{auth}} \cdot A + w_{\text{sent}} \cdot S + w_{\text{ver}} \cdot V + w_{\text{rich}} \cdot R + w_{\text{rec}} \cdot C + w_{\text{rate}} \cdot G$$
-
-Where:
-* **$A$ (Authenticity)**: Determined by anomalies. Calculated as $1.0 - \text{averageSpamScore}$.
-* **$S$ (Sentiment)**: Model probability outputs.
-* **$V$ (Verified Ratio)**: The fraction of reviews made by verified buyers.
-* **$R$ (Richness)**: Logarithmic length scaling: $\min\left(1.0, \frac{\ln(\text{wordCount} + 1)}{\ln(60)}\right) + 0.2$ (if images are present).
-* **$C$ (Recency)**: Exponential time-decay factor.
-* **$G$ (Rating Score)**: Star rating normalized to the range $[0.2, 1.0]$.
-
-*Default Weights*: $w_{\text{auth}} = 0.35$, $w_{\text{sent}} = 0.20$, $w_{\text{ver}} = 0.15$, $w_{\text{rich}} = 0.10$, $w_{\text{rec}} = 0.10$, $w_{\text{rate}} = 0.10$.
-
-### B. Time-Decay Model
-Reviews lose influence over time according to an exponential half-life curve (default half-life $t_{1/2} = 180$ days):
-
-$$C(t) = \max\left(0.20, \exp\left(-\frac{\ln(2)}{t_{1/2}} \cdot \Delta t\right)\right)$$
-
-Where $\Delta t$ is the age of the review in days.
-
-### C. Multi-Factor Product Ranking
-Instead of sorting products purely by star ratings, search results are ordered by a composite rank score:
-
-$$R_{\text{final}} = w_{\text{rel}} \cdot \text{Relevance} + w_{\text{trust}} \cdot \text{Trust} + w_{\text{rate}} \cdot \text{Rating} + w_{\text{rec}} \cdot \text{Recency}$$
-
-*Ranking Weights*: Relevance = $40\%$, Trust Score = $30\%$, Star Rating = $15\%$, Recency = $15\%$.
-
----
-
-## 4. Machine Learning NLP Pipeline
-
-The Python microservice processes reviews through a classic, high-performance classification pipeline:
-
-```
-Review Text ──► Cleaning ──► Lowercase ──► Remove Punctuation ──► Remove URLs ──► NLTK Tokenize ──► NLTK Lemmatizer ──► TF-IDF Vectorizer ──► Logistic Regression ──► Probability Prediction
-```
-
-### Metrics & Model Evaluation
-The classifier is trained on a balanced clothing review dataset. The evaluation artifacts are stored in `server/nlp_service/evaluation/`:
-* **Confusion Matrix** (`confusion_matrix.png`): Visualizes true vs. predicted classifications.
-* **Classification Report** (`classification_report.txt`): Precision, recall, and F1 scores.
-* **Metrics** (`metrics.json`): Outlines overall accuracy, F1, vocabulary size, and **5-Fold Cross-Validation Scores** (mean CV: 100.00%).
-* **Feature Importance** (`feature_importance.csv`): Complete sorted list of TF-IDF word features, coefficients, and sentiment impact category (Top Positive: *premium, excellent, soft*; Top Negative: *cheap, loose, terrible*).
-
----
-
-## 5. Performance Benchmarks
-
-For complete details, view the [Benchmark Report](file:///c:/Users/kaurc/Downloads/amazon/server/benchmark.md).
-
-| Metric | Average Latency (ms) | Throughput (Requests/sec) | Memory Footprint (MB) |
-| :--- | :--- | :--- | :--- |
-| **FastAPI NLP Inference** | $8.2$ ms | $120$ req/sec | $135$ MB |
-| **OpenSearch DSL Search** | $14.5$ ms | $85$ req/sec | N/A (Cluster-side) |
-| **Integrated Review Audit** | $4.1$ ms | $240$ jobs/sec | $78$ MB |
-
----
-
-## 6. REST API Documentation
-
-Complete Swagger/OpenAPI documentation is available live at **`/api/docs`** on the gateway.
-
-### Search Endpoint
-`GET /api/search`
-* **Query Params**:
-  * `q` (string): Search query.
-  * `category` (string): Filter by category.
-  * `removeSuspicious` (boolean): Filters out suspect items if `true`.
-* **Response**:
-  ```json
-  {
-    "status": "success",
-    "cloudService": "Amazon OpenSearch Service",
-    "data": {
-      "engine": "Amazon OpenSearch Cluster",
-      "results": [
-        {
-          "id": "prod-1",
-          "title": "Cotton Polo Shirt",
-          "price": 29.99,
-          "isSuspicious": false,
-          "rankingExplanation": {
-            "relevanceScore": 1.0,
-            "trustScore": 0.892,
-            "ratingScore": 0.9,
-            "recencyScore": 0.75,
-            "text": "Overall SDE Rank: 0.871 (Relevance Match: 1.0 [W: 40%], Trust Rank: 0.89 [W: 30%], Genuine Rating: 0.90 [W: 15%], Time Decay: 0.75 [W: 15%])"
-          }
-        }
-      ]
-    }
-  }
-  ```
-
-### Batch Prediction Endpoint (FastAPI Microservice)
-`POST /api/predict/batch`
-* **Request Body**:
-  ```json
-  {
-    "reviews": [
-      { "id": "rev-1", "text": "Very comfortable and premium fit." },
-      { "id": "rev-2", "text": "Worst dress ever, shrank in the wash." }
-    ]
-  }
-  ```
-* **Response**:
-  ```json
-  {
-    "status": "success",
-    "predictions": [
-      { "id": "rev-1", "sentiment": "POSITIVE", "score": 0.92, "confidence": 0.95 },
-      { "id": "rev-2", "sentiment": "NEGATIVE", "score": 0.12, "confidence": 0.88 }
-    ]
-  }
-  ```
-
----
-
-## 7. Local Setup Instructions
-
-### Backend Prerequisites
-* Node.js v18+
-* Python 3.10+
-* MongoDB local instance or Atlas connection string
-
-### FastAPI NLP Service Setup
-1. Navigate to the service folder:
-   ```bash
-   cd server/nlp_service
-   ```
-2. Install Python packages:
-   ```bash
-   pip install -r requirements.txt
-   ```
-3. Run the training script to generate evaluation metrics:
-   ```bash
-   python train.py
-   ```
-4. Start the FastAPI microservice:
-   ```bash
-   uvicorn main:app --host 127.0.0.1 --port 8000
+   ```powershell
+   python -m venv .venv
+   .\.venv\Scripts\python.exe -m pip install -r server/nlp_service/requirements.txt
    ```
 
-### Express REST API Setup
-1. Open a new terminal and navigate to the project root:
-   ```bash
-   cd ../..
+   Download the model once into the project-local ignored model folder. This avoids repeated downloads and keeps the large checkpoint out of source control:
+
+   ```powershell
+   .\.venv\Scripts\python.exe -c 'from huggingface_hub import snapshot_download; snapshot_download(repo_id="cardiffnlp/twitter-roberta-base-sentiment-latest", local_dir="server/nlp_service/models/cardiffnlp/twitter-roberta-base-sentiment-latest", allow_patterns=["config.json","vocab.json","merges.txt","tokenizer_config.json","special_tokens_map.json","pytorch_model.bin"])'
+   $env:SENTIMENT_MODEL_ID = (Resolve-Path "server/nlp_service/models/cardiffnlp/twitter-roberta-base-sentiment-latest").Path
+   Push-Location server/nlp_service
+   ..\..\.venv\Scripts\python.exe -m uvicorn main:app --host 127.0.0.1 --port 8000
+   Pop-Location
    ```
-2. Install Node dependencies:
-   ```bash
-   npm install
+
+   Keep this terminal open. Verify `http://127.0.0.1:8000/health` reports `modelLoaded: true`. Run `/api/v1/predict` once to confirm inference.
+
+3. In a second terminal, install Node dependencies and create `.env` from `.env.example` only if you do not already have a local `.env`:
+
+   ```powershell
+   npm ci
+   if (-not (Test-Path .env)) { Copy-Item .env.example .env }
    ```
-3. Configure environment variables in `.env`:
+
+   `.env` should contain:
+
    ```env
    PORT=5000
-   MONGODB_URI=mongodb+srv://...
    OPENSEARCH_NODE=http://localhost:9200
    NLP_SERVICE_URL=http://localhost:8000/api/v1
+   FRONTEND_ORIGIN=http://localhost:5173
    ```
-4. Start the Express server:
-   ```bash
+
+   Adjust local ports as needed. Production must use HTTPS, secure cookie delivery, a restricted `FRONTEND_ORIGIN`, protected OpenSearch access, and a managed identity/security setup. Never commit `.env`, credentials, or model access tokens.
+
+4. The Kaggle CSV and held-out catalog are included. To reproduce the catalog split from the source file, run:
+
+   ```powershell
+   pip install -r server/nlp_service/requirements-data.txt
+   npm run prepare:dataset
+   ```
+
+   This shared deterministic split keeps Clothing IDs disjoint: approximately 70% train, 15% evaluation, 15% demo catalog. The catalog reviews are not used to fit or evaluate the model.
+
+5. Seed the dataset catalog once, after OpenSearch and the sentiment service are ready:
+
+   ```powershell
+   npm run seed
+   ```
+
+   The seed command imports the held-out product groups and skips seeding if the index already contains documents. To reset a local demo, delete the `myntrarank_products` index in your OpenSearch UI/API, then run the seed command again.
+
+6. Start the API and frontend in separate terminals:
+
+   ```powershell
+   npm run server
    npm run dev
    ```
 
-### Running Backend Tests
-Ensure the server is stopped or port `5000` is clear, then run:
-```bash
-npm test
+   Readiness is available at `http://localhost:5000/health/ready`; API documentation is at `/api/docs`.
+
+   If readiness returns `503`, first check that OpenSearch is reachable and then check the sentiment service at `/health`. Do not seed the catalog again if the index already contains products; the seed command intentionally skips a non-empty index.
+
+## Optional domain fine-tuning
+
+The default transformer is pretrained, not fine-tuned on this project's product reviews. The training script uses only the included Women’s Clothing dataset and derives three sentiment proxy classes from ratings (1–2 negative, 3 neutral, 4–5 positive). It reports evaluation metrics and saves a local model. Ratings are noisy sentiment proxies, not human-annotated sentiment labels.
+
+For transformer fine-tuning, install the training dependencies and run:
+
+```powershell
+pip install -r requirements-training.txt
+$env:SENTIMENT_TRAINING_CSV='C:\path\to\Womens Clothing E-Commerce Reviews.csv'
+python train.py
 ```
+
+Then configure `SENTIMENT_MODEL_ID` to the resulting `models/trustrank-sentiment` directory before launching the FastAPI service. Rating-derived labels are noisy proxies, not human-annotated sentiment. Keep the default pretrained checkpoint if fine-tuning does not improve a held-out review set.
+
+## Evaluation and limitations
+
+Run the JavaScript checks with `npm test` and frontend static checks/build with `npm run lint` and `npm run build`. The Python API can be checked through `/health` and prediction endpoints. Do not use old benchmark figures in `server/benchmark.md`: they were not supplied with reproducible harness/results for this transformer version.
+
+This is a portfolio demo, not a production marketplace. Accounts have no email verification, password reset, account recovery, purchase verification, moderation queues, appeals, abuse reporting, privacy retention controls, durable backups, or load testing. Reviews are embedded in product documents and score recalculation is synchronous, so very high review volume per product needs normalized review storage and durable background aggregation. The in-process product queue coordinates one API process; multiple API instances need database-level uniqueness/locking or a shared durable queue. Search pagination and independent review pagination are also future work for a larger catalog.

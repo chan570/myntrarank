@@ -1,42 +1,58 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { apiClient } from './services/apiClient';
 import { Header } from './components/Header';
 import { SidebarFilters } from './components/SidebarFilters';
 import { ProductCard } from './components/ProductCard';
 import { ProductDetail } from './components/ProductDetail';
+import { AuthDialog } from './components/AuthDialog';
+import { HomePage } from './components/HomePage';
+import { getEvidenceAdjustedRating, getEvidenceAdjustedTrust } from './services/rankingDisplay';
 import './index.css';
 
-/*This file performs 8 major tasks:
-
-Maintains all application state.
-Calls the backend whenever the search/filter changes.
-Stores backend search results.
-Filters and sorts the products.
-Opens and closes the product detail page.
-Handles wishlist and shopping bag.
-Shows toast notifications.
-Decides which components should be rendered. */
 export function App() {
-  // Application States
-  const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("All");
-  const [sortOption, setSortOption] = useState("rank");
-  const [removeSuspicious, setRemoveSuspicious] = useState(true);
-  const [filterLowReviews, setFilterLowReviews] = useState(true);
+  const [searchInput, setSearchInput] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchRevision, setSearchRevision] = useState(0);
+  const [activeCategory, setActiveCategory] = useState('All');
+  const [page, setPage] = useState('home');
+  const [sortOption, setSortOption] = useState('trust');
+  const [filterLowReviews, setFilterLowReviews] = useState(false);
   const [minRatingFilter, setMinRatingFilter] = useState(0);
   const [selectedProduct, setSelectedProduct] = useState(null);
-  const [selectedSize, setSelectedSize] = useState("M");
   const [searchResults, setSearchResults] = useState([]);
   const [isLoading, setIsLoading] = useState(false);
   const [backendError, setBackendError] = useState(null);
-
-  // Scroll Memory & E-Commerce Bag/Wishlist State
+  const [toastMessage, setToastMessage] = useState('');
+  const [currentUser, setCurrentUser] = useState(null);
+  const [authDialogMode, setAuthDialogMode] = useState(null);
+  const [reviewedProductIds, setReviewedProductIds] = useState(() => new Set());
   const scrollYPos = useRef(0);
-  const [bagItems, setBagItems] = useState([]);
-  const [wishlistItems, setWishlistItems] = useState([]);
-  const [toastMessage, setToastMessage] = useState("");
+  const searchRequestId = useRef(0);
 
-  // Product Navigation Handlers
+  const applySearch = (query = searchInput) => {
+    const cleanQuery = query.trim();
+    setSearchInput(cleanQuery);
+    setSearchQuery(cleanQuery);
+    setSearchRevision((revision) => revision + 1);
+    setSelectedProduct(null);
+    setSearchResults([]);
+    setPage('search');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const browseCategory = (category) => {
+    setActiveCategory(category);
+    setSearchInput('');
+    setSearchQuery('');
+    setFilterLowReviews(false);
+    setMinRatingFilter(0);
+    setSearchRevision((revision) => revision + 1);
+    setSelectedProduct(null);
+    setSearchResults([]);
+    setPage('search');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const openProductDetail = (product) => {
     scrollYPos.current = window.scrollY;
     setSelectedProduct(product);
@@ -46,48 +62,65 @@ export function App() {
   const backToSearchResults = () => {
     const targetScroll = scrollYPos.current;
     setSelectedProduct(null);
-    setTimeout(() => {
-      window.scrollTo({ top: targetScroll, behavior: 'instant' });
-    }, 0);
+    setTimeout(() => window.scrollTo({ top: targetScroll, behavior: 'instant' }), 0);
   };
 
-  const resetToHome = (e) => {
-    if (e) e.preventDefault();
+  const resetToHome = (event) => {
+    event?.preventDefault();
+    setPage('home');
+    setActiveCategory('All');
+    setFilterLowReviews(false);
+    setMinRatingFilter(0);
+    setSearchInput('');
+    setSearchQuery('');
+    setSearchRevision((revision) => revision + 1);
     setSelectedProduct(null);
-    setSearchQuery("");
-    setActiveCategory("All");
-    scrollYPos.current = 0;
+    setSearchResults([]);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  // Toast Auto-Dismiss
   useEffect(() => {
-    if (toastMessage) {
-      const timer = setTimeout(() => setToastMessage(""), 3200);
-      return () => clearTimeout(timer);
-    }
+    if (!toastMessage) return undefined;
+    const timer = setTimeout(() => setToastMessage(''), 3600);
+    return () => clearTimeout(timer);
   }, [toastMessage]);
 
-  // E-Commerce Bag & Wishlist Actions
-  const addToBag = (product, size) => {
-    setBagItems(prev => [...prev, { product, size, addedAt: Date.now() }]);
-    setToastMessage(`🛍️ Added ${product.title} (Size ${size}) to Bag!`);
+  useEffect(() => {
+    let isMounted = true;
+    apiClient.getCurrentUser().then((user) => { if (isMounted) setCurrentUser(user); }).catch(() => {});
+    return () => { isMounted = false; };
+  }, []);
+
+  const handleReviewSubmit = async (reviewPayload) => {
+    const response = await apiClient.submitReview(reviewPayload);
+    setReviewedProductIds((ids) => new Set(ids).add(`${currentUser.id}:${reviewPayload.productId}`));
+    setToastMessage('Review saved. Your current results stay in place; the latest order appears when you search again or return home.');
+    return response;
   };
 
-  const toggleWishlist = (product) => {
-    const exists = wishlistItems.some(item => item.id === product.id);
-    if (exists) {
-      setWishlistItems(prev => prev.filter(item => item.id !== product.id));
-      setToastMessage(`🤍 Removed ${product.title} from Wishlist`);
-    } else {
-      setWishlistItems(prev => [...prev, product]);
-      setToastMessage(`❤️ Added ${product.title} to Wishlist!`);
+  const handleAuthSubmit = async (mode, payload) => {
+    const user = mode === 'register'
+      ? await apiClient.registerAccount(payload)
+      : await apiClient.login(payload);
+    setCurrentUser(user);
+    setAuthDialogMode(null);
+    setToastMessage(`Welcome, ${user.name}. You can now submit a review.`);
+  };
+
+  const handleLogout = async () => {
+    try {
+      await apiClient.logout();
+      setCurrentUser(null);
+      setToastMessage('You have signed out.');
+    } catch (error) {
+      setToastMessage(error.message || 'Could not sign out. Please try again.');
     }
   };
 
-  // Execute Backend Search via Express REST API & Amazon OpenSearch
   useEffect(() => {
     let isMounted = true;
+    const requestId = ++searchRequestId.current;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- loading reflects the query request lifecycle.
     setIsLoading(true);
     setBackendError(null);
 
@@ -98,201 +131,135 @@ export function App() {
       rich: 0.10,
       rec: 0.10,
       rate: 0.10,
-      removeSuspicious,
-      filterLowReviews,
-      minRating: minRatingFilter,
-      categoryFilter: activeCategory
-    }).then(data => {
-      if (isMounted) {
+      removeSuspicious: false,
+      filterLowReviews: false,
+      minRating: 0,
+      categoryFilter: activeCategory,
+    }).then((data) => {
+      if (isMounted && requestId === searchRequestId.current) {
         setSearchResults(Array.isArray(data.results) ? data.results : []);
         setIsLoading(false);
       }
-    }).catch(err => {
-      if (isMounted) {
-        console.error("Backend unavailable:", err.message);
+    }).catch((error) => {
+      if (isMounted && requestId === searchRequestId.current) {
         setSearchResults([]);
-        setBackendError("Unable to reach the TrustRank backend. Please ensure the server is running.");
+        setBackendError(error.message || 'TrustRank could not load search results.');
         setIsLoading(false);
       }
     });
-
     return () => { isMounted = false; };
-  }, [searchQuery, removeSuspicious, filterLowReviews, minRatingFilter, activeCategory]);
+  }, [searchQuery, searchRevision, activeCategory]);
 
-  const checkIsFakeProduct = (product) => {
-    if (!product) return false;
-    const authScore = product.authenticityScore !== undefined
-      ? product.authenticityScore
-      : (product.auditedMetrics?.authenticityScore !== undefined ? product.auditedMetrics.authenticityScore : 1.0);
-    return Boolean(
-      product.isSuspicious ||
-      product.isFlaggedAsFake ||
-      product.isFlagged ||
-      authScore < 0.60 ||
-      (product.anomalyType && product.anomalyType !== "low_review_count")
-    );
+  const hasReviewRiskSignals = (product) => {
+    const score = product.authenticityScore ?? product.auditedMetrics?.authenticityScore ?? 1;
+    return Boolean(product.isSuspicious || product.reviewRiskFlagged || score < 0.60
+      || (product.anomalyType && product.anomalyType !== 'low_review_count'));
   };
 
-  // Handle Sort Controls
-  const finalSortedProducts = useMemo(() => {
-    let listCopy = [...searchResults];
-
-    if (removeSuspicious) {
-      listCopy = listCopy.filter(product => !checkIsFakeProduct(product));
-    }
-
+  const displayedProducts = useMemo(() => {
+    const products = [...searchResults];
     if (filterLowReviews) {
-      listCopy = listCopy.filter(product => {
-        const totalReviews = product.totalReviewsCount ?? product.auditedMetrics?.totalReviewsCount ?? (product.reviews ? product.reviews.length : 0);
-        return totalReviews >= 10 && product.anomalyType !== "low_review_count";
-      });
+      for (let index = products.length - 1; index >= 0; index -= 1) {
+        const count = products[index].totalReviewsCount ?? products[index].reviews?.length ?? 0;
+        if (count < 10) products.splice(index, 1);
+      }
     }
-
-    if (sortOption === "price-asc") {
-      listCopy.sort((a, b) => a.price - b.price);
-    } else if (sortOption === "price-desc") {
-      listCopy.sort((a, b) => b.price - a.price);
-    } else if (sortOption === "rating") {
-      listCopy.sort((a, b) => b.rawAvgRating - a.rawAvgRating);
+    if (minRatingFilter > 0) {
+      for (let index = products.length - 1; index >= 0; index -= 1) {
+        const rating = Number(products[index].rawAvgRating ?? products[index].averageGenuineRating ?? products[index].auditedMetrics?.genuineRating ?? 0);
+        if (rating < minRatingFilter) products.splice(index, 1);
+      }
     }
-    return listCopy;
-  }, [searchResults, sortOption, removeSuspicious, filterLowReviews]);
+    if (sortOption === 'rating') products.sort((a, b) => getEvidenceAdjustedRating(b) - getEvidenceAdjustedRating(a));
+    if (sortOption === 'trust') products.sort((a, b) => getEvidenceAdjustedTrust(b) - getEvidenceAdjustedTrust(a));
+    return products;
+  }, [searchResults, sortOption, filterLowReviews, minRatingFilter]);
 
-  const formatDate = (timestamp) => {
-    const d = new Date(timestamp);
-    const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-    return `${d.getDate()} ${months[d.getMonth()]} ${d.getFullYear()}`;
-  };
+  const sortHelp = {
+    trust: 'Search still matches your words first. This orders matching items by review trust, with small samples treated cautiously.',
+    rating: 'Search still matches your words first. This orders matching items by star rating, with small samples treated cautiously.',
+  }[sortOption];
+
+  const formatDate = (timestamp) => new Intl.DateTimeFormat('en', { dateStyle: 'medium' }).format(new Date(timestamp));
 
   return (
-    <div className="app-container">
-      {/* Toast Notification Bar */}
-      {toastMessage && (
-        <div className="toast-notification">
-          <span>{toastMessage}</span>
-          <button className="toast-close" onClick={() => setToastMessage("")}>✕</button>
-        </div>
-      )}
+    <div className="app-container trust-app">
+      {toastMessage && <div className="toast-notification" role="status"><span>{toastMessage}</span><button className="toast-close" onClick={() => setToastMessage('')} aria-label="Dismiss">×</button></div>}
 
-      {/* Header Bar */}
       <Header
-        searchQuery={searchQuery}
-        setSearchQuery={setSearchQuery}
-        activeCategory={activeCategory}
-        setActiveCategory={setActiveCategory}
-        setSelectedProduct={setSelectedProduct}
-        wishlistItems={wishlistItems}
-        bagItems={bagItems}
-        setToastMessage={setToastMessage}
-        resetToHome={resetToHome}
+        searchQuery={searchInput}
+        setSearchQuery={setSearchInput}
+        onSearch={applySearch}
+        user={currentUser}
+        openAuth={setAuthDialogMode}
+        onLogout={handleLogout}
         isLoading={isLoading}
+        resetToHome={resetToHome}
       />
 
-      {/* Product Detail Page View vs Catalog Search Grid View */}
       {selectedProduct ? (
         <ProductDetail
           selectedProduct={selectedProduct}
           backToSearchResults={backToSearchResults}
-          selectedSize={selectedSize}
-          setSelectedSize={setSelectedSize}
-          addToBag={addToBag}
-          toggleWishlist={toggleWishlist}
-          wishlistItems={wishlistItems}
           formatDate={formatDate}
+          submitReview={handleReviewSubmit}
+          currentUser={currentUser}
+          alreadyReviewed={currentUser ? reviewedProductIds.has(`${currentUser.id}:${selectedProduct.id}`) : false}
+          openAuth={setAuthDialogMode}
+          backLabel={page === 'home' ? '← Back to Home' : '← Back to Search Results'}
+        />
+      ) : page === 'home' ? (
+        <HomePage
+          products={displayedProducts}
+          isLoading={isLoading}
+          onChooseCategory={browseCategory}
+          openProductDetail={openProductDetail}
+          hasReviewRiskSignals={hasReviewRiskSignals}
         />
       ) : (
         <>
-          <div className="stats-subheader">
-            <div>
-              Search results: <strong>{finalSortedProducts.length}</strong> items
-              {searchQuery && <span> for "<strong>{searchQuery}</strong>"</span>}
-            </div>
-          </div>
+          <section className="search-page-heading">
+            <span className="section-eyebrow">SEARCH RESULTS</span>
+            <h1>{searchQuery ? `Results for “${searchQuery}”` : activeCategory === 'All' ? 'All clothing' : `Browse ${activeCategory}`}</h1>
+            <p>{displayedProducts.length} matching demo items</p>
+          </section>
 
-          <div className="main-layout">
+          <div className="main-layout trust-main-layout">
             <SidebarFilters
-              removeSuspicious={removeSuspicious}
-              setRemoveSuspicious={setRemoveSuspicious}
               filterLowReviews={filterLowReviews}
               setFilterLowReviews={setFilterLowReviews}
               minRatingFilter={minRatingFilter}
               setMinRatingFilter={setMinRatingFilter}
             />
-
-            <main className="content-area">
-              <div className="toolbar">
-                <div className="results-count">
-                  Ranked Products <span>(Showing verified products sorted by trust score)</span>
-                </div>
-
-                <div className="sort-container">
-                  <span style={{ color: 'var(--myntra-secondary)', fontSize: '13px' }}>Sort by</span>
-                  <select
-                    value={sortOption}
-                    onChange={(e) => setSortOption(e.target.value)}
-                    style={{ padding: '6px 12px', borderRadius: '4px', border: '1px solid var(--myntra-border)', fontWeight: '600', cursor: 'pointer' }}
-                  >
-                    <option value="rank">⭐ Recommended (Trust Score)</option>
-                    <option value="rating">★ Highest Customer Rating</option>
-                    <option value="price-asc">₹ Price: Low to High</option>
-                    <option value="price-desc">₹ Price: High to Low</option>
+            <main className="content-area trust-content-area">
+              <div className="toolbar trust-toolbar">
+                <div className="results-count"><strong>{sortOption === 'rating' ? 'Highest star rating' : 'Most trusted reviews'}</strong><span>{sortHelp}</span></div>
+                <label className="sort-container">Sort by
+                  <select aria-label="Choose how to sort products" value={sortOption} onChange={(event) => setSortOption(event.target.value)}>
+                    <option value="trust">Most trusted reviews</option>
+                    <option value="rating">Highest star rating</option>
                   </select>
-                </div>
+                </label>
               </div>
 
               {isLoading ? (
-                <div className="search-loading-container">
-                  <div className="premium-glow-spinner"></div>
-                  <p className="loading-subtitle">Auditing and ranking products with TrustRank...</p>
-
-                  <div className="skeleton-grid">
-                    {[1, 2, 3, 4].map(n => (
-                      <div key={n} className="skeleton-card">
-                        <div className="skeleton-image" />
-                        <div className="skeleton-line short" />
-                        <div className="skeleton-line long" />
-                        <div className="skeleton-line medium" />
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                <div className="trust-loading"><div className="trust-loader" /><div><strong>Finding your results</strong><p>This will only take a moment…</p></div></div>
               ) : backendError ? (
-                <div className="empty-results-state" style={{ padding: '48px 40px', textAlign: 'center', color: 'var(--myntra-secondary)', width: '100%' }}>
-                  <div style={{ fontSize: '48px', marginBottom: '16px' }}>⚠️</div>
-                  <h3 style={{ color: 'var(--myntra-primary)', marginBottom: '8px' }}>Backend Unavailable</h3>
-                  <p style={{ maxWidth: '420px', margin: '0 auto 20px' }}>{backendError}</p>
-                  <button
-                    onClick={() => {
-                      setBackendError(null);
-                      setSearchQuery(q => q);
-                    }}
-                    style={{ padding: '10px 24px', borderRadius: '6px', background: 'var(--myntra-accent)', color: '#fff', border: 'none', fontWeight: '600', cursor: 'pointer' }}
-                  >
-                    Retry
-                  </button>
-                </div>
-              ) : finalSortedProducts.length === 0 ? (
-                <div className="empty-results-state" style={{ padding: '40px', textAlign: 'center', color: 'var(--myntra-secondary)', width: '100%' }}>
-                  <h3>No products found</h3>
-                  <p>Try clearing some filters or searching for another query.</p>
-                </div>
+                <div className="trust-empty-state"><span>Not available right now</span><h3>We couldn’t load the products.</h3><p>Please try again in a moment.</p><button type="button" onClick={() => applySearch(searchInput)}>Try again</button></div>
+              ) : displayedProducts.length === 0 ? (
+                <div className="trust-empty-state"><span>No items found</span><h3>Try a different word or clear a filter.</h3><p>Try “dress”, “top”, or “jeans”, or browse all clothing.</p><button type="button" onClick={resetToHome}>Show all clothing</button></div>
               ) : (
-                <div className="product-grid">
-                  {finalSortedProducts.map((product, index) => (
-                    <ProductCard
-                      key={product.id}
-                      product={product}
-                      index={index}
-                      isFake={checkIsFakeProduct(product)}
-                      openProductDetail={openProductDetail}
-                    />
-                  ))}
+                <div className="product-grid trust-product-grid">
+                  {displayedProducts.map((product, index) => <ProductCard key={product.id} product={product} index={index} isRiskFlagged={hasReviewRiskSignals(product)} openProductDetail={openProductDetail} />)}
                 </div>
               )}
+              <footer className="trust-footer"><span>TRUSTRANK</span><p>Demo reviews come from a public clothing dataset. Product photos are examples, not photos of these specific items. New reviews are not purchase-verified.</p><span>CLOTHING REVIEW DEMO</span></footer>
             </main>
           </div>
         </>
       )}
+
+      {authDialogMode && <AuthDialog initialMode={authDialogMode} onClose={() => setAuthDialogMode(null)} onSubmit={handleAuthSubmit} />}
     </div>
   );
 }

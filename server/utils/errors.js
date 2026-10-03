@@ -31,6 +31,12 @@ export class NotFoundError extends AppError {
   }
 }
 
+export class ConflictError extends AppError {
+  constructor(message, details = {}) {
+    super(message, 409, 'CONFLICT', details);
+  }
+}
+
 export class MLServiceError extends AppError {
   constructor(message, details = {}) {
     super(message, 502, 'ML_SERVICE_ERROR', details);
@@ -54,6 +60,7 @@ export default {
   ValidationError,
   DatabaseError,
   NotFoundError,
+  ConflictError,
   MLServiceError,
   SearchServiceError,
   AuthenticationError

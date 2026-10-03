@@ -12,4 +12,12 @@ export const apiRateLimiter = rateLimit({
   }
 });
 
+export const authenticationRateLimiter = rateLimit({
+  windowMs: config.rateLimitWindowMs,
+  max: 50,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { status: 'error', message: 'Too many sign-in attempts. Please wait and try again.' },
+});
+
 export default apiRateLimiter;

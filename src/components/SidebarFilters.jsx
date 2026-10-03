@@ -1,63 +1,45 @@
-import React from 'react';
-//This component is the left sidebar of your application. Its only responsibility is to display filter options and notify the parent component whenever the user changes a filter.
 export const SidebarFilters = ({
-  removeSuspicious,
-  setRemoveSuspicious,
   filterLowReviews,
   setFilterLowReviews,
   minRatingFilter,
-  setMinRatingFilter
-}) => {
-  return (
-    <aside className="sidebar">
-      <div className="sidebar-section" style={{ borderBottom: '1px solid var(--myntra-border)', paddingBottom: '15px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: 'var(--myntra-brand)', fontWeight: '700', fontSize: '13px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-          <span>🛡️</span> Trust Audit Active
-        </div>
-        <p style={{ fontSize: '12px', color: 'var(--myntra-secondary)', marginTop: '6px', lineHeight: '1.4' }}>
-          Ratings are audited to exclude fake/bot spam and unverified purchase floods.
-        </p>
-      </div>
+  setMinRatingFilter,
+}) => (
+  <aside className="sidebar" aria-label="Narrow your results">
+    <div className="sidebar-section filter-intro">
+      <div className="filter-heading"><span aria-hidden="true">✦</span> Choose what matters</div>
+      <p>Search always finds matching products first. Use these to narrow the list.</p>
+    </div>
 
-      <div className="sidebar-section">
-        <div className="sidebar-title">Filters</div>
-        
-        <label className="filter-option">
-          <input 
-            type="checkbox" 
-            checked={removeSuspicious}
-            onChange={(e) => setRemoveSuspicious(e.target.checked)}
-          />
-          <span>Filter out fake/bot reviews</span>
-        </label>
+    <div className="sidebar-section">
+      <div className="sidebar-title">Narrow your results</div>
+      <label className="filter-option filter-option-explained">
+        <input
+          type="checkbox"
+          checked={filterLowReviews}
+          onChange={(event) => setFilterLowReviews(event.target.checked)}
+        />
+        <span><strong>Require at least 10 reviews</strong><small>Hides products with fewer than 10 reviews. It does not change their order.</small></span>
+      </label>
 
-        <label className="filter-option" style={{ marginTop: '8px' }}>
-          <input 
-            type="checkbox" 
-            checked={filterLowReviews}
-            onChange={(e) => setFilterLowReviews(e.target.checked)}
-          />
-          <span>Hide products with &lt; 10 reviews</span>
-        </label>
-
-        <div style={{ marginTop: '20px' }}>
-          <span style={{ fontSize: '13px', fontWeight: '700', display: 'block', marginBottom: '8px' }}>Min Rating</span>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            {[0, 3, 4].map(rating => (
-              <button 
-                key={rating}
-                className={`btn ${minRatingFilter === rating ? "btn-primary" : "btn-outline"}`}
-                style={{ padding: '6px 12px', fontSize: '12px', flex: 1 }}
-                onClick={() => setMinRatingFilter(rating)}
-              >
-                {rating === 0 ? "All" : `${rating}★ +`}
-              </button>
-            ))}
-          </div>
+      <div className="rating-filter">
+        <span className="rating-filter-title">Minimum star rating</span>
+        <div className="rating-filter-options">
+          {[0, 3, 4, 5].map((rating) => (
+            <button
+              key={rating}
+              type="button"
+              className={minRatingFilter === rating ? 'rating-filter-button active' : 'rating-filter-button'}
+              aria-pressed={minRatingFilter === rating}
+              onClick={() => setMinRatingFilter(rating)}
+            >
+              {rating === 0 ? 'Any rating' : `${rating} stars and up`}
+            </button>
+          ))}
         </div>
       </div>
-    </aside>
-  );
-};
+      <p className="filter-footnote">Review-pattern warnings are signals, not proof that a review is fake.</p>
+    </div>
+  </aside>
+);
 
 export default SidebarFilters;

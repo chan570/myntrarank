@@ -1,33 +1,43 @@
-import React from 'react';
 import { StarIcon } from './Icons';
+import { getProductImage } from '../services/productImagery';
+import { getEvidenceAdjustedTrust, getReviewCount } from '../services/rankingDisplay';
 //Take one product object and display it beautifully on the screen.
 export const ProductCard = ({
   product,
   index,
-  isFake,
+  isRiskFlagged,
   openProductDetail
 }) => {
-  const totalReviews = product.totalReviewsCount ?? product.auditedMetrics?.totalReviewsCount ?? (product.reviews ? product.reviews.length : 0);
-  const isLowReviews = !isFake && (totalReviews < 10 || product.anomalyType === "low_review_count");
+  const totalReviews = getReviewCount(product);
+  const isLowReviews = !isRiskFlagged && (totalReviews < 10 || product.anomalyType === "low_review_count");
+  const trustScore = getEvidenceAdjustedTrust(product);
 
   return (
-    <div 
-      className={`product-card ${isFake ? 'flagged-card' : ''}`}
+    <div
+      className={`product-card ${isRiskFlagged ? 'flagged-card' : ''}`}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          openProductDetail(product);
+        }
+      }}
       onClick={() => openProductDetail(product)}
     >
       <div className="rank-badge">{index + 1}</div>
 
       <div className="product-image-wrapper">
-        <img 
-          src={product.image} 
-          alt={product.title} 
-          loading="lazy" 
+        <img
+          src={getProductImage(product)}
+          alt={product.title}
+          loading="lazy"
           onError={(e) => {
             e.target.onerror = null;
-            e.target.src = "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80";
+            e.target.src = getProductImage(product, true);
           }}
         />
-        
+
         <div className="rating-pill">
           <span className="rating-val">{(product.rawAvgRating || 4.0).toFixed(1)}</span>
           <StarIcon className="star-icon" />
@@ -35,15 +45,15 @@ export const ProductCard = ({
         </div>
 
         {/* Visual Badges */}
-        {isFake && (
+        {isRiskFlagged && (
           <div className="card-flag-badge danger-flag">
-            ⚠️ Fake Reviews
+            ⚠️ Review pattern warning
           </div>
         )}
 
         {isLowReviews && (
           <div className="card-flag-badge warning-flag">
-            ⚡ &lt; 10 Reviews
+            ⚡ Few reviews
           </div>
         )}
       </div>
@@ -51,12 +61,12 @@ export const ProductCard = ({
       <div className="product-info">
         <div className="product-brand">{product.brand}</div>
         <div className="product-title">{product.title}</div>
-
-        <div className="price-row">
-          <span className="current-price">₹{product.price}</span>
-          <span className="original-price">₹{product.originalPrice}</span>
-          <span className="discount">({product.discountPercent}% OFF)</span>
+        <div className="product-trust-meter" aria-label={`Review trust score ${Math.round(trustScore * 100)} out of 100`}>
+          <span>Review trust</span><strong>{Math.round(trustScore * 100)}<small>/100</small></strong>
+          <i><b style={{ width: `${Math.max(0, Math.min(100, trustScore * 100))}%` }} /></i>
+          {totalReviews < 10 && <small className="trust-score-note">Early estimate based on {totalReviews} {totalReviews === 1 ? 'review' : 'reviews'}</small>}
         </div>
+        <div className="price-row">Demo catalog · {product.category}</div>
       </div>
     </div>
   );

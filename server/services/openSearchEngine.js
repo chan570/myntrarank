@@ -1,14 +1,19 @@
 /**
- * TRUSTRANK AMAZON OPENSEARCH SERVICE
- * Direct integration with Amazon OpenSearch / Elasticsearch REST DSL.
- * Pure execution path with no local in-memory fallbacks.
+ * TrustRank OpenSearch catalog, review, and ranking store.
+ * No in-memory success fallback: failed index operations are surfaced to callers.
  */
 
 import { Client } from '@opensearch-project/opensearch';
 import { TRUST_WEIGHTS, RANKING_WEIGHTS } from '../constants/weights.js';
+import { NotFoundError } from '../utils/errors.js';
 
 const INDEX_NAME = 'myntrarank_products';
 const OPENSEARCH_NODE = process.env.OPENSEARCH_NODE || 'http://localhost:9200';
+const CLOTHING_SINGULARS = {
+  dress: 'dresses', top: 'tops', jacket: 'jackets', blouse: 'blouses',
+  skirt: 'skirts', sweater: 'sweaters', jean: 'jeans', pant: 'pants',
+  short: 'shorts', coat: 'coats', intimate: 'intimates',
+};
 
 export class OpenSearchEngine {
   constructor() {
@@ -24,7 +29,7 @@ export class OpenSearchEngine {
     if (this.initPromise) return this.initPromise;
 
     this.initPromise = (async () => {
-      console.log(`[OpenSearch Engine] Connecting to Amazon OpenSearch / Elasticsearch cluster at ${OPENSEARCH_NODE}...`);
+      console.log(`[OpenSearch Engine] Connecting to OpenSearch at ${OPENSEARCH_NODE}...`);
       const pingRes = await this.client.ping();
       if (!pingRes) {
         throw new Error(`Could not ping OpenSearch cluster at ${OPENSEARCH_NODE}`);
@@ -76,9 +81,23 @@ export class OpenSearchEngine {
 
   // Get single document by ID
   async getDocument(id) {
+    const record = await this.getDocumentRecord(id);
+    return record.document;
+  }
+
+  async getDocumentRecord(id) {
     await this.init();
-    const res = await this.client.get({ index: INDEX_NAME, id });
-    return res.body._source;
+    try {
+      const res = await this.client.get({ index: INDEX_NAME, id });
+      return {
+        document: res.body._source,
+        seqNo: res.body._seq_no,
+        primaryTerm: res.body._primary_term,
+      };
+    } catch (error) {
+      if (error.statusCode === 404 || error.meta?.statusCode === 404) throw new NotFoundError('Product not found');
+      throw error;
+    }
   }
 
   // Get all documents
@@ -100,7 +119,7 @@ export class OpenSearchEngine {
   }
 
   // Insert or update a single document
-  async upsertDocument(product) {
+  async upsertDocument(product, version = null) {
     if (!product || !product.id) return;
     await this.init();
 
@@ -133,12 +152,17 @@ export class OpenSearchEngine {
       }
     };
 
-    await this.client.index({
+    const indexRequest = {
       index: INDEX_NAME,
       id: product.id,
       body: doc,
       refresh: true
-    });
+    };
+    if (version) {
+      indexRequest.if_seq_no = version.seqNo;
+      indexRequest.if_primary_term = version.primaryTerm;
+    }
+    await this.client.index(indexRequest);
   }
 
   // Bulk index documents
@@ -231,10 +255,16 @@ export class OpenSearchEngine {
 
     // DSL Search Engine Path
     const queryTokens = queryText.toLowerCase().trim().split(/\s+/).filter(Boolean);
+    const expandedQuery = queryTokens.map((token) => CLOTHING_SINGULARS[token] || token).join(' ');
     const baseMatch = queryTokens.length > 0 ? {
-      multi_match: {
-        query: queryText,
-        fields: ['title^12', 'brand^8', 'tags^6', 'category^5', 'description^2']
+      bool: {
+        should: [...new Set([queryText, expandedQuery])].map((candidate) => ({
+          multi_match: {
+            query: candidate,
+            fields: ['title^12', 'brand^8', 'tags^6', 'category^5', 'description^2']
+          }
+        })),
+        minimum_should_match: 1
       }
     } : { match_all: {} };
 
@@ -273,7 +303,6 @@ export class OpenSearchEngine {
               double rich = doc['auditedMetrics.richnessScore'].value;
               double rec = doc['auditedMetrics.recencyScore'].value;
               double rate = doc['auditedMetrics.ratingScore'].value;
-              
               double trust = (params.wAuth * auth) + (params.wSent * sent) + (params.wVer * ver) + (params.wRich * rich) + (params.wRec * rec) + (params.wRate * rate);
               
               // Normalize score base
@@ -281,14 +310,12 @@ export class OpenSearchEngine {
               if (relevance > 1.0) relevance = 1.0;
               
               // SDE Composite Ranking Score
-              return (params.rRel * relevance) + (params.rTr * trust) + (params.rRate * rate) + (params.rRec * rec);
+              return (params.rRel * relevance) + (params.rTr * trust);
             `,
             params: { 
               wAuth, wSent, wVer, wRich, wRec, wRate,
               rRel: RANKING_WEIGHTS.relevance,
-              rTr: RANKING_WEIGHTS.trustScore,
-              rRate: RANKING_WEIGHTS.rating,
-              rRec: RANKING_WEIGHTS.recency
+              rTr: RANKING_WEIGHTS.trustScore
             }
           }
         }
@@ -306,7 +333,7 @@ export class OpenSearchEngine {
       const finalScore = hit._score || 1.0;
       const m = doc.auditedMetrics || {};
       const authScore = m.authenticityScore ?? 1.0;
-      const isFake = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
+      const isRiskFlagged = doc.isSuspicious || authScore < 0.60 || (doc.anomalyType && doc.anomalyType !== 'low_review_count');
 
       const trustScore = (wAuth * authScore) + 
                          (wSent * (m.sentimentScore ?? 0.5)) + 
@@ -315,7 +342,7 @@ export class OpenSearchEngine {
                          (wRec * (m.recencyScore ?? 0.5)) + 
                          (wRate * (m.ratingScore ?? 0.8));
 
-      const queryRelevance = Math.min(1.0, (finalScore - (RANKING_WEIGHTS.trustScore * trustScore)) / RANKING_WEIGHTS.relevance);
+      const queryRelevance = Math.max(0, Math.min(1.0, (finalScore - (RANKING_WEIGHTS.trustScore * trustScore)) / RANKING_WEIGHTS.relevance));
 
       const rankingExplanation = {
         relevanceScore: Number(queryRelevance.toFixed(2)),
@@ -323,7 +350,7 @@ export class OpenSearchEngine {
         ratingScore: Number((m.ratingScore ?? 0.8).toFixed(2)),
         recencyScore: Number((m.recencyScore ?? 0.5).toFixed(2)),
         weights: RANKING_WEIGHTS,
-        text: `Overall SDE Rank: ${finalScore.toFixed(3)} (Relevance Match: ${queryRelevance.toFixed(1)} [W: 40%], Trust Rank: ${trustScore.toFixed(2)} [W: 30%], Genuine Rating: ${(m.ratingScore ?? 0.8).toFixed(2)} [W: 15%], Time Decay: ${(m.recencyScore ?? 0.5).toFixed(2)} [W: 15%])`
+        text: `Overall rank: ${finalScore.toFixed(3)} (Relevance: ${queryRelevance.toFixed(2)}, TrustRank: ${trustScore.toFixed(2)}; rating and recency are included once in TrustRank)`
       };
 
       return {
@@ -331,17 +358,17 @@ export class OpenSearchEngine {
         authenticityScore: authScore,
         rawAvgRating: m.genuineRating ?? 4.0,
         totalReviewsCount: m.totalReviewsCount ?? (doc.reviews ? doc.reviews.length : 0),
-        isFlaggedAsFake: isFake,
-        isSuspicious: isFake,
+        reviewRiskFlagged: isRiskFlagged,
+        isSuspicious: isRiskFlagged,
         relevanceScore: Number(queryRelevance.toFixed(2)),
-        compositeTrustScore: Number(authScore.toFixed(3)),
+        compositeTrustScore: Number(trustScore.toFixed(3)),
         finalRankScore: Number(finalScore.toFixed(3)),
         rankingExplanation
       };
     });
 
     return {
-      engine: 'Amazon OpenSearch Cluster (DSL + Painless Script Scoring)',
+      engine: 'OpenSearch (DSL + script scoring)',
       results,
       totalMatches: results.length,
       totalIndexed: response.body.hits.total.value || results.length,

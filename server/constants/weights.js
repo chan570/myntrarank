@@ -13,10 +13,8 @@ export const TRUST_WEIGHTS = {
 };
 
 export const RANKING_WEIGHTS = {
-  relevance: 0.40, // Match score boost
-  trustScore: 0.30, // TrustRank composite integrity score
-  rating: 0.15,     // Customer rating score
-  recency: 0.15     // Recency decay score
+  relevance: 0.40, // Query match quality
+  trustScore: 0.60 // Composite already includes sentiment, rating, and recency
 };
 
 export const TIME_DECAY_HALF_LIFE_DAYS = 180; // Configurable half-life

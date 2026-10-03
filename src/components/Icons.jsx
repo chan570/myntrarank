@@ -1,4 +1,3 @@
-import React from 'react';
 import { Search, Star, ShoppingBag, Heart } from 'lucide-react';
 
 export const SearchIcon = ({ className = "search-icon" }) => (

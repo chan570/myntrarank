@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 760" fill="none">
+  <defs><linearGradient id="bg" x2="1" y2="1"><stop stop-color="#f7eee8"/><stop offset="1" stop-color="#eadff0"/></linearGradient><linearGradient id="cloth" x2=".9" y2="1"><stop stop-color="#a77b92"/><stop offset="1" stop-color="#76566f"/></linearGradient><filter id="shadow" x="100" y="90" width="440" height="600" filterUnits="userSpaceOnUse"><feGaussianBlur stdDeviation="18"/></filter></defs>
+  <rect width="640" height="760" rx="28" fill="url(#bg)"/><circle cx="512" cy="140" r="112" fill="#fff" fill-opacity=".38"/><path d="M87 580c88-59 185-64 275-28 75 30 130 28 194-7v126H87V580Z" fill="#fff" fill-opacity=".24"/>
+  <path d="M211 175 270 145h100l59 30 84 65-58 96-53-36v259H238V300l-53 36-58-96 84-65Z" fill="#423144" fill-opacity=".23" filter="url(#shadow)" transform="translate(0 12)"/>
+  <path d="m217 169 55-27h96l55 27 82 65-58 91-48-31v252H241V294l-48 31-58-91 82-65Z" fill="url(#cloth)"/><path d="m272 142 24 48 24 28 24-28 24-48" stroke="#d8b6c7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/><path d="M320 218v301M264 269v222M376 269v222" stroke="#d8b6c7" stroke-opacity=".48" stroke-width="3"/><circle cx="320" cy="254" r="4" fill="#f2dce7"/><circle cx="320" cy="282" r="4" fill="#f2dce7"/><circle cx="320" cy="310" r="4" fill="#f2dce7"/>
+  <text x="40" y="704" fill="#685568" font-family="Arial,sans-serif" font-size="16" letter-spacing="3">DEMO CATALOG · TOPS</text>
+</svg>

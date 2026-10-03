@@ -1,6 +1,7 @@
 import config from '../config/env.js';
 
 export function errorHandler(err, req, res, next) {
+  void next;
   // Extract custom SDE error codes or fall back
   const statusCode = err.statusCode || 500;
   const errorCode = err.code || 'INTERNAL_ERROR';

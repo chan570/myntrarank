@@ -1,77 +1,54 @@
-import { generateProducts } from '../../src/data/mockProducts.js';
-import { Product } from '../models/Product.js';
-import { Review } from '../models/Review.js';
+import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { auditProductReviews } from './auditEngine.js';
 import { openSearchService } from './openSearchEngine.js';
 
-export async function seedDatabase(isMemoryFallback = false) {
-  console.log(`🚀 Initializing TrustRank Database Seeder (Generating 1,100 products & 27,000+ reviews)...`);
+const CATALOG_PATH = fileURLToPath(new URL('../data/demo_catalog.json', import.meta.url));
 
-  const mockData = generateProducts();
-
-  // Audit products directly using the Node.js audit engine
-  console.log(`⚡ Running audit pipeline on ${mockData.length} products (Sequentially to prevent ML API overload)...`);
-  const auditedProducts = [];
-  let i = 0;
-  for (const p of mockData) {
-    const metrics = await auditProductReviews(p.reviews || []);
-    auditedProducts.push({ ...p, auditedMetrics: metrics, auditedBy: 'TF-IDF + Logistic Regression ML Engine' });
-    i++;
-    if (i % 50 === 0) console.log(`   ...audited ${i}/${mockData.length} products`);
+export async function seedDatabase() {
+  const existingCount = await openSearchService.getDocumentCount();
+  if (existingCount > 0) {
+    console.log(`TrustRank index already contains ${existingCount} products; seed skipped.`);
+    return existingCount;
   }
-  console.log(`✅ Audit complete! ${auditedProducts.length} products processed.`);
-  let dbProducts = [];
 
-  if (!isMemoryFallback) {
-    try {
-      const existingCount = await Product.countDocuments();
-      if (existingCount === 0) {
-        console.log(`📦 Seeding MongoDB Database with 1,100 products...`);
-        for (let idx = 0; idx < auditedProducts.length; idx++) {
-          const p = auditedProducts[idx];
-          const audited = p.auditedMetrics || await auditProductReviews(p.reviews || []);
-          const newProd = new Product({
-            id: p.id,
-            title: p.title,
-            brand: p.brand,
-            description: p.description,
-            image: p.image,
-            price: p.price,
-            originalPrice: p.originalPrice,
-            discountPercent: p.discountPercent,
-            category: p.category,
-            tags: p.tags,
-            anomalyType: p.anomalyType,
-            isSuspicious: p.isSuspicious,
-            auditedMetrics: audited
-          });
-          await newProd.save();
-
-          if (p.reviews && p.reviews.length > 0) {
-            const revDocs = p.reviews.map((r, rIdx) => ({
-              ...r,
-              id: `rev-${p.id}-${rIdx}-${Date.now()}`,
-              productId: p.id
-            }));
-            try {
-              await Review.insertMany(revDocs, { ordered: false });
-            } catch (rErr) {}
-          }
-        }
-        console.log(`✅ MongoDB Seeded Successfully!`);
-      }
-      dbProducts = await Product.find().lean();
-    } catch (err) {
-      console.warn(`⚠️ MongoDB Seed Bypass: ${err.message}`);
-      dbProducts = auditedProducts;
+  let products;
+  try {
+    products = JSON.parse(await readFile(CATALOG_PATH, 'utf8'));
+  } catch (error) {
+    if (error.code === 'ENOENT') {
+      throw new Error('Dataset catalog is missing. Install `server/nlp_service/requirements-data.txt`, then run `npm run prepare:dataset`.', { cause: error });
     }
-  } else {
-    console.log(`⚡ Seeding In-Memory Data Store...`);
-    dbProducts = auditedProducts;
+    throw error;
+  }
+  const auditedProducts = [];
+  for (let index = 0; index < products.length; index += 1) {
+    const product = products[index];
+    const audited = await auditProductReviews(product.reviews);
+    auditedProducts.push({
+      ...product,
+      reviews: audited.auditedReviews,
+      auditedMetrics: {
+        authenticityScore: audited.authenticityScore,
+        sentimentScore: audited.sentimentScore,
+        verifiedRatio: audited.verifiedRatio,
+        richnessScore: audited.richnessScore,
+        recencyScore: audited.recencyScore,
+        ratingScore: audited.ratingScore,
+        genuineRating: audited.genuineRating,
+        validReviewsCount: audited.validReviewsCount,
+        totalReviewsCount: audited.totalReviewsCount,
+        isLowReviewCount: audited.isLowReviewCount,
+      },
+      auditedBy: 'Transformer sentiment + heuristic review-risk signals',
+      dataType: 'heldout-dataset-demo',
+      isSuspicious: audited.authenticityScore < 0.60,
+    });
+    if ((index + 1) % 10 === 0) console.log(`Audited ${index + 1}/${products.length} demo products`);
   }
 
-  // Populate OpenSearch Engine
-  await openSearchService.bulkIndex(dbProducts);
+  await openSearchService.bulkIndex(auditedProducts);
   const count = await openSearchService.getDocumentCount();
-  console.log(`🔍 Amazon OpenSearch Index Populated with ${count} documents.`);
+  console.log(`Seeded ${count} held-out dataset products into OpenSearch.`);
+  return count;
 }

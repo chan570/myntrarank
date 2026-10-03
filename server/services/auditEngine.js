@@ -5,8 +5,7 @@
  * spike detection, rating anomaly audits, and configures spam scores per review.
  */
 
-import { analyzeNLPSentiment } from './nlpEngine.js';
-import { TRUST_WEIGHTS, TIME_DECAY_HALF_LIFE_DAYS, AUDIT_THRESHOLDS } from '../constants/weights.js';
+import { TIME_DECAY_HALF_LIFE_DAYS, AUDIT_THRESHOLDS } from '../constants/weights.js';
 
 // DJB2 Hash String Primitive for fast duplicate checks
 export function hashString(str) {
@@ -22,6 +21,8 @@ export function hashString(str) {
 
 // Exponential Half-Life Time Decay Scorer
 export function calculateTimeDecay(reviewDate, halfLifeDays = TIME_DECAY_HALF_LIFE_DAYS) {
+  // The source dataset has no review timestamps; do not invent dates for it.
+  if (reviewDate === undefined || reviewDate === null || reviewDate === '') return 1;
   const now = Date.now();
   const dateMs = typeof reviewDate === 'number' ? reviewDate : new Date(reviewDate).getTime();
   const diffDays = Math.max(0, (now - dateMs) / (1000 * 60 * 60 * 24));
@@ -102,16 +103,11 @@ export function auditSingleReview(review, allReviews, velocitySpikeDates) {
   }
 
   // 6. Review Velocity Spike Check
-  const dateKey = new Date(review.date).toISOString().split('T')[0];
-  if (velocitySpikeDates.has(dateKey)) {
+  const dateMs = review.date ? new Date(review.date).getTime() : NaN;
+  const dateKey = Number.isFinite(dateMs) ? new Date(dateMs).toISOString().split('T')[0] : null;
+  if (dateKey && velocitySpikeDates.has(dateKey)) {
     reasons.push('velocity_spike_anomaly');
     spamPoints += AUDIT_THRESHOLDS.velocitySpikePenalty;
-  }
-
-  // 7. Rating Anomaly (Verified purchase status combined with 5-star rating)
-  if (review.rating === 5 && !review.verified) {
-    reasons.push('unverified_5_star');
-    spamPoints += AUDIT_THRESHOLDS.unverifiedPenalty;
   }
 
   const spamScore = Number(Math.max(0.0, Math.min(1.0, spamPoints)).toFixed(3));
@@ -152,7 +148,9 @@ export async function auditProductReviews(reviews) {
   // Pass 1: Pre-calculate velocity spikes dates
   const dateCounts = {};
   for (const r of reviews) {
-    const dateKey = new Date(r.date).toISOString().split('T')[0];
+    const dateMs = r.date ? new Date(r.date).getTime() : NaN;
+    if (!Number.isFinite(dateMs)) continue;
+    const dateKey = new Date(dateMs).toISOString().split('T')[0];
     dateCounts[dateKey] = (dateCounts[dateKey] || 0) + 1;
   }
   const velocitySpikeDates = new Set();
@@ -187,25 +185,43 @@ export async function auditProductReviews(reviews) {
   let sentimentSum = 0;
   let verifiedCount = 0;
   let richnessSum = 0;
+  let datedDecaySum = 0;
+  let datedReviewCount = 0;
 
-  let sentimentScores = [];
-  try {
-    const texts = validReviews.map(r => r.text || '');
+  const sentimentScores = new Array(validCount);
+  const uncached = [];
+  validReviews.forEach((review, idx) => {
+    if (Number.isFinite(review.sentimentPolarityScore) && review.sentimentPolarityScore >= 0 && review.sentimentPolarityScore <= 1) {
+      sentimentScores[idx] = review.sentimentPolarityScore;
+    } else {
+      uncached.push({ idx, text: review.text || '' });
+    }
+  });
+  if (uncached.length > 0) {
     const { analyzeNLPSentimentBatch } = await import('./nlpEngine.js');
-    sentimentScores = await analyzeNLPSentimentBatch(texts);
-  } catch(e) {
-    console.warn("Batch failed, using default sentiments");
+    const predictions = await analyzeNLPSentimentBatch(uncached.map((item) => item.text));
+    uncached.forEach((item, index) => {
+      sentimentScores[item.idx] = predictions[index];
+      validReviews[item.idx].sentimentPolarityScore = predictions[index];
+    });
+  }
+  if (sentimentScores.length !== validCount || sentimentScores.some((score) => !Number.isFinite(score) || score < 0 || score > 1)) {
+    throw new Error('Sentiment service returned an invalid prediction batch');
   }
 
   for (let idx = 0; idx < validReviews.length; idx++) {
     const r = validReviews[idx];
     const decay = calculateTimeDecay(r.date);
-    const sent = sentimentScores[idx] !== undefined ? sentimentScores[idx] : 0.5;
+    const sent = sentimentScores[idx];
     const textLen = (r.text || '').split(/\s+/).filter(Boolean).length;
     const richness = Math.min(1.0, Math.log(textLen + 1) / Math.log(60)) + (r.images && r.images.length > 0 ? 0.2 : 0);
 
     weightedRatingSum += r.rating * decay;
     totalDecayWeight += decay;
+    if (r.date && Number.isFinite(new Date(r.date).getTime())) {
+      datedDecaySum += decay;
+      datedReviewCount += 1;
+    }
     sentimentSum += sent;
     richnessSum += Math.min(1.0, richness);
     if (r.verified) verifiedCount++;
@@ -215,7 +231,10 @@ export async function auditProductReviews(reviews) {
   const sentimentScore = validCount > 0 ? Number((sentimentSum / validCount).toFixed(2)) : 0.5;
   const verifiedRatio = validCount > 0 ? Number((verifiedCount / validCount).toFixed(2)) : 0;
   const richnessScore = validCount > 0 ? Number((richnessSum / validCount).toFixed(2)) : 0;
-  const recencyScore = validCount > 0 ? Number((totalDecayWeight / validCount).toFixed(2)) : 0.2;
+  // Missing source dates are neutral. Include them in the denominator so that
+  // one newly submitted review cannot make a product look dramatically fresher
+  // than a catalog item whose historical reviews have no timestamps.
+  const recencyScore = Number(((datedDecaySum + ((totalReviewsCount - datedReviewCount) * 0.5)) / totalReviewsCount).toFixed(2));
   const ratingScore = Number((genuineRating / 5.0).toFixed(2));
 
   return {

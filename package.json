@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "server": "node server/server.js",
-
+    "seed": "node server/seed.js",
+    "prepare:dataset": "python server/nlp_service/prepare_dataset.py",
     "start": "node server/server.js",
     "build": "vite build",
     "lint": "eslint .",
@@ -21,7 +22,6 @@
     "express-rate-limit": "^8.6.1",
     "helmet": "^8.3.0",
     "lucide-react": "^1.25.0",
-    "mongoose": "^9.4.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
     "swagger-ui-express": "^5.0.1"

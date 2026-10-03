@@ -1,31 +1,48 @@
-import React, { useState } from 'react';
+import { useRef, useState } from 'react';
+import { getProductImage } from '../services/productImagery';
+import { getEvidenceAdjustedTrust, getReviewCount } from '../services/rankingDisplay';
 
 export const ProductDetail = ({
   selectedProduct,
   backToSearchResults,
-  selectedSize,
-  setSelectedSize,
-  addToBag,
-  toggleWishlist,
-  wishlistItems,
-  formatDate
+  formatDate,
+  submitReview,
+  currentUser,
+  alreadyReviewed,
+  openAuth,
+  backLabel = '← Back to Search Results',
 }) => {
-  const [pincode, setPincode] = useState("");
-  const [pincodeStatus, setPincodeStatus] = useState("");
+  const [reviewText, setReviewText] = useState("");
+  const [reviewRating, setReviewRating] = useState('');
+  const [reviewSubmitted, setReviewSubmitted] = useState(false);
+  const [newReview, setNewReview] = useState(null);
+  const [reviewState, setReviewState] = useState({ pending: false, message: '', error: false });
+  const requestId = useRef(null);
 
-  const authenticity = selectedProduct.authenticityScore ?? selectedProduct.auditedMetrics?.authenticityScore ?? 1.0;
-  const sentiment = selectedProduct.sentimentScore ?? selectedProduct.auditedMetrics?.sentimentScore ?? 0.5;
-  const verifiedRatio = selectedProduct.verifiedRatio ?? selectedProduct.auditedMetrics?.verifiedRatio ?? 0.8;
   const genuineRating = selectedProduct.averageGenuineRating ?? selectedProduct.rawAvgRating ?? selectedProduct.auditedMetrics?.genuineRating ?? 4.0;
-  const reviewsList = selectedProduct.reviews || [];
-  const isWishlisted = wishlistItems.some(item => item.id === selectedProduct.id);
+  const compositeTrust = getEvidenceAdjustedTrust(selectedProduct);
+  const reviewCount = getReviewCount(selectedProduct);
+  const reviewsList = [newReview, ...(selectedProduct.reviews || [])].filter(Boolean);
 
-  const checkPincode = () => {
-    if (!pincode || pincode.length !== 6) {
-      setPincodeStatus("Please enter a valid 6-digit PIN code.");
-      return;
+  const handleReviewSubmit = async (event) => {
+    event.preventDefault();
+    setReviewState({ pending: true, message: '', error: false });
+    requestId.current ||= crypto.randomUUID();
+    try {
+      const response = await submitReview({
+        requestId: requestId.current,
+        productId: selectedProduct.id,
+        rating: Number(reviewRating),
+        text: reviewText
+      });
+      setNewReview(response?.data?.review || null);
+      requestId.current = null;
+      setReviewSubmitted(true);
+      setReviewText('');
+      setReviewState({ pending: false, message: 'Your review is saved. Your current results stay in place; the latest order appears when you search again or return home.', error: false });
+    } catch (error) {
+      setReviewState({ pending: false, message: error.message || 'Could not submit the review. Please try again.', error: true });
     }
-    setPincodeStatus(`✅ Delivery available at ${pincode} by Tomorrow!`);
   };
 
   return (
@@ -33,23 +50,23 @@ export const ProductDetail = ({
       {/* Breadcrumb & Back Navigation */}
       <div className="pdp-breadcrumb">
         <button className="back-btn" onClick={backToSearchResults}>
-          ← Back to Search Results
+          {backLabel}
         </button>
         <span>Home / {selectedProduct.category} / <strong>{selectedProduct.brand}</strong> / {selectedProduct.title}</span>
       </div>
 
       {/* PDP Main 2-Column Grid */}
       <div className="pdp-main-grid">
-        
+
         {/* Left Column: Product Showcase Image */}
         <div className="pdp-gallery">
           <div className="pdp-main-image-wrapper">
-            <img 
-              src={selectedProduct.image} 
-              alt={selectedProduct.title} 
+            <img
+              src={getProductImage(selectedProduct)}
+              alt={selectedProduct.title}
               onError={(e) => {
                 e.target.onerror = null;
-                e.target.src = "https://images.unsplash.com/photo-1542291026-7eec264c27ff?w=400&q=80";
+                e.target.src = getProductImage(selectedProduct, true);
               }}
             />
           </div>
@@ -64,85 +81,34 @@ export const ProductDetail = ({
           <div className="pdp-rating-badge">
             <span className="pdp-rating-val">{genuineRating.toFixed(1)} ★</span>
             <span className="pdp-rating-sep">|</span>
-            <span className="pdp-rating-count">{reviewsList.length} Verified Ratings</span>
-            <span className="pdp-trust-shield">🛡️ Audited Genuine Score</span>
+            <span className="pdp-rating-count">{reviewCount} dataset reviews{newReview ? ' + 1 new demo review' : ''}</span>
           </div>
 
           <div className="pdp-divider" />
-
-          {/* Price Section */}
-          <div className="pdp-price-row">
-            <span className="pdp-current-price">₹{selectedProduct.price}</span>
-            <span className="pdp-original-price">MRP ₹{selectedProduct.originalPrice}</span>
-            <span className="pdp-discount">({selectedProduct.discountPercent}% OFF)</span>
-          </div>
-          <div className="pdp-tax-note">inclusive of all taxes</div>
-
-          {/* Size Selector */}
-          <div className="pdp-size-section">
-            <div className="pdp-size-title">SELECT SIZE</div>
-            <div className="pdp-size-options">
-              {["S", "M", "L", "XL", "XXL"].map(size => (
-                <button 
-                  key={size}
-                  className={`size-btn ${selectedSize === size ? "active" : ""}`}
-                  onClick={() => setSelectedSize(size)}
-                >
-                  {size}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* CTA Action Buttons */}
-          <div className="pdp-cta-buttons">
-            <button className="btn-add-to-bag" onClick={() => addToBag(selectedProduct, selectedSize)}>
-              🛍️ ADD TO BAG
-            </button>
-            <button className={`btn-wishlist ${isWishlisted ? 'wishlisted' : ''}`} onClick={() => toggleWishlist(selectedProduct)}>
-              {isWishlisted ? "❤️ WISHLISTED" : "🤍 WISHLIST"}
-            </button>
-          </div>
-
-          {/* Delivery Checker */}
-          <div className="pdp-delivery-box">
-            <div className="delivery-title">DELIVERY OPTIONS 🚚</div>
-            <div className="pdp-pincode-wrapper">
-              <input 
-                type="text" 
-                placeholder="Enter pincode" 
-                maxLength={6} 
-                value={pincode}
-                onChange={(e) => setPincode(e.target.value)}
-              />
-              <button onClick={checkPincode}>Check</button>
-            </div>
-            {pincodeStatus && <div className="pincode-status-msg">{pincodeStatus}</div>}
-          </div>
+          <p>This demo uses public clothing reviews. The fashion photo is an example, not a photo of this exact item. Signing in lets you post a review, but does not confirm a purchase.</p>
 
           <div className="pdp-divider" />
 
-          {/* Audited Trust & Review Breakdown */}
+          {/* Simple customer feedback summary */}
           <div className="pdp-trust-card">
-            <h3 className="trust-card-title">🛡️ TrustRank Review Integrity Audit</h3>
-            <p className="trust-card-desc">Reviews are continuously audited by DJB2 text deduplication, density spike detection, and exponential time decay.</p>
-            
+            <h3 className="trust-card-title">Customer feedback</h3>
+            <p className="trust-card-desc">The star rating shows what reviewers thought. Review trust combines review-quality signals and the number of reviews into one comparison score.</p>
+
             <div className="trust-metrics-grid">
               <div className="metric-box">
-                <div className="metric-num">{Math.round(authenticity * 100)}%</div>
-                <div className="metric-label">Authenticity Score</div>
-              </div>
-              <div className="metric-box">
-                <div className="metric-num">{Math.round(sentiment * 100)}%</div>
-                <div className="metric-label">Positive Sentiment</div>
-              </div>
-              <div className="metric-box">
-                <div className="metric-num">{Math.round(verifiedRatio * 100)}%</div>
-                <div className="metric-label">Verified Buyers</div>
-              </div>
-              <div className="metric-box">
                 <div className="metric-num">{genuineRating.toFixed(1)} ★</div>
-                <div className="metric-label">Genuine Rating</div>
+                <div className="metric-label">Customer rating</div>
+                <p className="metric-note">From {reviewCount} review{reviewCount === 1 ? '' : 's'}</p>
+              </div>
+              <div className="metric-box">
+                <div className="metric-num">{Math.round(compositeTrust * 100)}/100</div>
+                <div className="metric-label">Review trust</div>
+                <p className="metric-note">A guide, not proof that reviews are genuine.</p>
+              </div>
+              <div className="metric-box">
+                <div className="metric-num metric-unknown">Unknown</div>
+                <div className="metric-label">Purchase verified</div>
+                <p className="metric-note">This demo has no order records to check.</p>
               </div>
             </div>
           </div>
@@ -150,18 +116,45 @@ export const ProductDetail = ({
           {/* Customer Reviews Section */}
           <div className="pdp-reviews-section">
             <h3 className="pdp-reviews-title">Customer Reviews ({reviewsList.length})</h3>
-            
+
+            {currentUser && (alreadyReviewed || reviewSubmitted || reviewsList.some((review) => review.userId === currentUser.id)) ? (
+              <div className="review-signin-card review-already-submitted"><div className="review-signin-icon">✓</div><div><strong>You’ve reviewed this product</strong><p>Your review is saved. The current product order stays in place until you search again or return home.</p></div></div>
+            ) : currentUser ? <form className="review-submit-form" onSubmit={handleReviewSubmit}>
+              <h4>Share your review</h4>
+              <p className="review-author-note">Posting as <strong>{currentUser.name}</strong> · one review per product</p>
+              <label>
+                Rating
+                <select value={reviewRating} onChange={(event) => setReviewRating(event.target.value)} required>
+                  <option value="" disabled>Select a rating</option>
+                  {[5, 4, 3, 2, 1].map((rating) => <option value={rating} key={rating}>{rating} stars</option>)}
+                </select>
+              </label>
+              <label>
+                Review
+                <textarea value={reviewText} onChange={(event) => setReviewText(event.target.value)} minLength={5} maxLength={2000} rows={4} required />
+              </label>
+              <p className="review-demo-note">Your review will show your account name. This demo cannot check whether you bought the item.</p>
+              <button type="submit" disabled={reviewState.pending || reviewSubmitted}>
+                {reviewState.pending ? 'Saving your review…' : 'Post review'}
+              </button>
+              {reviewState.message && <div role="status" className={reviewState.error ? 'review-form-error' : 'review-form-success'}><p>{reviewState.message}</p></div>}
+            </form> : <div className="review-signin-card">
+              <div className="review-signin-icon">✦</div>
+              <div><strong>Have you tried this item?</strong><p>Sign in to leave one review. This demo does not check purchase history.</p></div>
+              <button type="button" onClick={() => openAuth('login')}>Sign in to post</button>
+            </div>}
+
             <div className="pdp-reviews-list">
               {reviewsList.map((rev, idx) => (
                 <div key={idx} className="pdp-review-card">
                   <div className="review-card-header">
-                    <span className="reviewer-name">{rev.reviewerName || 'Verified Customer'}</span>
+                    <span className="reviewer-name">{rev.reviewerName || 'Anonymous dataset review'}</span>
                     <span className="review-star-badge">{rev.rating} ★</span>
                   </div>
                   <p className="review-text">{rev.text}</p>
                   <div className="review-footer">
-                    {rev.verified ? <span className="verified-badge">✓ Verified Purchase</span> : <span className="unverified-badge">Unverified</span>}
-                    <span className="review-date">{formatDate(rev.date)}</span>
+                    <span className="unverified-badge">{rev.source === 'user-submitted' ? 'Demo review · purchase not verified' : 'Historical dataset · purchase status unavailable'}</span>
+                    {rev.date && <span className="review-date">{formatDate(rev.date)}</span>}
                   </div>
                 </div>
               ))}

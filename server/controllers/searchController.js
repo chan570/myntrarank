@@ -28,7 +28,6 @@ export class SearchController {
       
       res.json({
         status: 'success',
-        cloudService: 'Amazon OpenSearch Service',
         data: searchResponse
       });
     } catch (error) {

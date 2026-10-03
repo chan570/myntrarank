@@ -25,7 +25,12 @@ dist-ssr
 .env
 
 opensearch-2.11.0/
-data/
+data/*.csv
+server/data/demo_catalog.json
 *.pkl
 *.bak
+__pycache__/
+*.py[cod]
+.venv/
+server/nlp_service/models/
 

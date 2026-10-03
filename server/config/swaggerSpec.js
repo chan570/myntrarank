@@ -1,9 +1,9 @@
 export const swaggerSpec = {
   openapi: '3.0.0',
   info: {
-    title: 'TrustRank Enterprise Trust & Ranking API Gateway',
-    version: '1.0.0',
-    description: 'API Gateway documenting search query rankings, buyer review audits, and ML pipelines.'
+    title: 'TrustRank Review Ranking API',
+    version: '2.0.0',
+    description: 'Account-aware review submission, score recalculation, and snapshot-based product ranking.'
   },
   servers: [
     {
@@ -11,7 +11,32 @@ export const swaggerSpec = {
       description: 'Local Development Server'
     }
   ],
+  components: {
+    securitySchemes: {
+      SessionCookie: { type: 'apiKey', in: 'cookie', name: 'trustrank_session' }
+    }
+  },
   paths: {
+    '/auth/register': {
+      post: {
+        summary: 'Create an account',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['name', 'email', 'password'], properties: { name: { type: 'string', minLength: 2, maxLength: 60 }, email: { type: 'string', format: 'email' }, password: { type: 'string', minLength: 10, maxLength: 128 } } } } } },
+        responses: { '201': { description: 'Account created and signed in' }, '409': { description: 'Email already registered' } }
+      }
+    },
+    '/auth/login': {
+      post: {
+        summary: 'Sign in',
+        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object', required: ['email', 'password'], properties: { email: { type: 'string', format: 'email' }, password: { type: 'string' } } } } } },
+        responses: { '200': { description: 'Signed in with an HttpOnly session cookie' }, '401': { description: 'Invalid credentials' } }
+      }
+    },
+    '/auth/me': {
+      get: { summary: 'Get the current account', responses: { '200': { description: 'Current account, or null when signed out' } } }
+    },
+    '/auth/logout': {
+      post: { summary: 'Sign out', responses: { '200': { description: 'Session revoked and cookie cleared' } } }
+    },
     '/search': {
       get: {
         summary: 'Query product search results',
@@ -100,67 +125,36 @@ export const swaggerSpec = {
     '/reviews': {
       post: {
         summary: 'Submit customer review',
-        description: 'Saves review in DB and flags product metrics as dirty for background batch re-auditing.',
+        description: 'Requires a signed-in account. Allows one review per account per product, recalculates scores, and leaves existing search snapshots unchanged. Use Idempotency-Key when retrying.',
+        security: [{ SessionCookie: [] }],
         requestBody: {
           required: true,
           content: {
             'application/json': {
               schema: {
                 type: 'object',
-                required: ['productId', 'reviewerName', 'rating', 'text'],
+                required: ['productId', 'rating', 'text'],
                 properties: {
                   productId: { type: 'string' },
-                  reviewerName: { type: 'string' },
                   rating: { type: 'integer', minimum: 1, maximum: 5 },
-                  text: { type: 'string' },
-                  verified: { type: 'boolean' }
+                  text: { type: 'string' }
                 }
               }
             }
           }
         },
         responses: {
-          '200': {
-            description: 'Review saved successfully'
+          '201': {
+            description: 'Review saved and product score recalculated'
+          },
+          '404': {
+            description: 'Product not found'
+          },
+          '502': {
+            description: 'Sentiment service unavailable; review was not indexed'
           },
           '400': {
             description: 'Validation exception'
-          }
-        }
-      }
-    },
-    '/admin/audit': {
-      post: {
-        summary: 'Trigger audit batch pipeline',
-        description: 'Initiates a full sweep processing spam checks, Type-Token Ratio scores, and ML sentiment evaluations.',
-        responses: {
-          '200': {
-            description: 'Audit completed successfully'
-          }
-        }
-      }
-    },
-    '/admin/inject-bot-attack': {
-      post: {
-        summary: 'Simulate bot review attack',
-        description: 'Appends 38 identical duplicate spam reviews to check anomaly detection resilience.',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                required: ['productId'],
-                properties: {
-                  productId: { type: 'string' }
-                }
-              }
-            }
-          }
-        },
-        responses: {
-          '200': {
-            description: 'Bot reviews injected successfully'
           }
         }
       }

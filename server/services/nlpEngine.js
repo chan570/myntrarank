@@ -1,6 +1,6 @@
 /**
  * TRUSTRANK NLP SENTIMENT GATEWAY
- * Direct connection to Python FastAPI ML Microservice (Logistic Regression + TF-IDF)
+ * Direct connection to the Python FastAPI transformer sentiment service.
  * Implements request timeouts and retry logic with exponential backoff.
  */
 
@@ -9,8 +9,10 @@ import { MLServiceError } from '../utils/errors.js';
 import { logger } from '../utils/logger.js';
 
 const MAX_RETRIES = 3;
+const MAX_BATCH_SIZE = 128; // Must match the FastAPI BatchReviewPayload limit.
 const INITIAL_BACKOFF_MS = 200;
 const TIMEOUT_MS = 3000; // 3 seconds timeout per request
+const BATCH_TIMEOUT_MS = 120000; // CPU transformer inference can take longer for full batches.
 
 async function fetchWithTimeout(url, options, timeout = TIMEOUT_MS) {
   const controller = new AbortController();
@@ -52,7 +54,7 @@ export async function analyzeNLPSentiment(text) {
 
       const data = await response.json();
       if (data && data.status === 'success') {
-        return data.score; // Float value between 0.05 and 0.98
+        return data.score; // Expected polarity score in the range [0, 1].
       }
       throw new Error("Malformed response format received from ML service.");
     } catch (err) {
@@ -69,11 +71,9 @@ export async function analyzeNLPSentiment(text) {
   }
 }
 
-export async function analyzeNLPSentimentBatch(texts) {
-  if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
-
+async function analyzeNLPSentimentBatchChunk(texts, offset) {
   const url = `${config.nlpServiceUrl}/predict/batch`;
-  const reviews = texts.map((t, idx) => ({ id: String(idx), text: t }));
+  const reviews = texts.map((text, index) => ({ id: String(offset + index), text }));
   
   let attempt = 1;
   let delay = INITIAL_BACKOFF_MS;
@@ -85,7 +85,7 @@ export async function analyzeNLPSentimentBatch(texts) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ reviews })
-      }, 30000); // 30 seconds for batch
+      }, BATCH_TIMEOUT_MS);
 
       if (!response.ok) {
         throw new Error(`HTTP ${response.status}: ${response.statusText}`);
@@ -93,6 +93,9 @@ export async function analyzeNLPSentimentBatch(texts) {
 
       const data = await response.json();
       if (data && data.status === 'success' && data.predictions) {
+        if (data.predictions.length !== texts.length) {
+          throw new Error(`Expected ${texts.length} sentiment predictions, received ${data.predictions.length}.`);
+        }
         return data.predictions.map(p => p.score);
       }
       throw new Error("Malformed response format received from ML service.");
@@ -107,6 +110,17 @@ export async function analyzeNLPSentimentBatch(texts) {
       attempt++;
     }
   }
+}
+
+export async function analyzeNLPSentimentBatch(texts) {
+  if (!texts || !Array.isArray(texts) || texts.length === 0) return [];
+
+  const scores = [];
+  for (let offset = 0; offset < texts.length; offset += MAX_BATCH_SIZE) {
+    const chunk = texts.slice(offset, offset + MAX_BATCH_SIZE);
+    scores.push(...await analyzeNLPSentimentBatchChunk(chunk, offset));
+  }
+  return scores;
 }
 
 export default { analyzeNLPSentiment };

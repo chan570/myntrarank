@@ -1,128 +1,113 @@
+"""TrustRank sentiment service backed by a pretrained transformer classifier.
+
+This service predicts sentiment only. It does not determine whether a review is
+genuine or purchase-verified.
+"""
+
 import os
-import json
-import joblib
+from typing import List
+
+import torch
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
-from typing import List
-import uvicorn
-from train import clean_and_preprocess
+from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-# Load model and vectorizer once on boot
-model_path = os.path.join(os.path.dirname(__file__), 'model.pkl')
-tfidf_path = os.path.join(os.path.dirname(__file__), 'tfidf.pkl')
 
-if not os.path.exists(model_path) or not os.path.exists(tfidf_path):
-    raise RuntimeError("Trained model files not found. Please run train.py first.")
+MODEL_ID = os.getenv(
+    "SENTIMENT_MODEL_ID", "cardiffnlp/twitter-roberta-base-sentiment-latest"
+)
+MAX_LENGTH = 512
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-model = joblib.load(model_path)
-vectorizer = joblib.load(tfidf_path)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL_ID)
+model.to(DEVICE)
+model.eval()
 
-# Initialize FastAPI app
 app = FastAPI(
-    title="TrustRank NLP Sentiment Microservice",
-    description="Production-grade TF-IDF + Logistic Regression Sentiment Classifier API.",
-    version="1.0.0"
+    title="TrustRank Transformer Sentiment Service",
+    description="Three-class transformer sentiment inference for product reviews.",
+    version="2.0.0",
 )
 
+
 class ReviewPayload(BaseModel):
-    text: str = Field(..., description="Review text to analyze", min_length=1)
+    text: str = Field(..., min_length=1, max_length=10000)
+
 
 class BatchReviewPayload(BaseModel):
-    id: str = Field(..., description="Unique review identifier")
-    text: str = Field(..., description="Review text to analyze", min_length=1)
+    id: str
+    text: str = Field(..., min_length=1, max_length=10000)
+
 
 class BatchPayload(BaseModel):
-    reviews: List[BatchReviewPayload] = Field(..., description="List of reviews to predict in batch")
+    reviews: List[BatchReviewPayload] = Field(..., max_length=128)
 
-class PredictionResponse(BaseModel):
-    status: str = "success"
-    sentiment: str = Field(..., description="Predicted sentiment class (POSITIVE/NEGATIVE)")
-    score: float = Field(..., description="Sentiment score normalized between 0.0 and 1.0")
-    confidence: float = Field(..., description="Model prediction probability confidence")
 
-class BatchPredictionItem(BaseModel):
-    id: str
-    sentiment: str
-    score: float
-    confidence: float
+def predict_texts(texts: List[str]):
+    if not texts:
+        return []
+    inputs = tokenizer(
+        texts,
+        padding=True,
+        truncation=True,
+        max_length=MAX_LENGTH,
+        return_tensors="pt",
+    ).to(DEVICE)
 
-class BatchPredictionResponse(BaseModel):
-    status: str = "success"
-    predictions: List[BatchPredictionItem]
+    with torch.inference_mode():
+        probabilities = torch.softmax(model(**inputs).logits, dim=-1).cpu()
 
-def predict_single_text(text: str):
-    cleaned = clean_and_preprocess(text)
-    features = vectorizer.transform([cleaned])
-    probabilities = model.predict_proba(features)[0]  # [prob_neg, prob_pos]
-    prob_pos = probabilities[1]
-    prob_neg = probabilities[0]
-    
-    if prob_pos >= 0.5:
-        sentiment = "POSITIVE"
-        confidence = prob_pos
-        score = prob_pos
-    else:
-        sentiment = "NEGATIVE"
-        confidence = prob_neg
-        score = prob_pos
-        
-    score = float(max(0.05, min(0.98, score)))
-    confidence = float(max(0.50, min(1.0, confidence)))
-    return sentiment, round(score, 3), round(confidence, 3)
+    labels = [model.config.id2label[index].lower() for index in range(probabilities.shape[1])]
+    label_indexes = {label: index for index, label in enumerate(labels)}
+    required = {"negative", "neutral", "positive"}
+    if not required.issubset(label_indexes):
+        raise RuntimeError(f"Expected model labels {sorted(required)}, got {labels}")
 
-@app.post("/api/v1/predict", response_model=PredictionResponse)
-async def predict_sentiment(payload: ReviewPayload):
+    results = []
+    for row in probabilities:
+        values = {label: float(row[index]) for label, index in label_indexes.items()}
+        sentiment = max(required, key=lambda label: values[label]).upper()
+        # Expected polarity in [0,1], with neutral centered at 0.5.
+        score = values["positive"] + (0.5 * values["neutral"])
+        confidence = values[sentiment.lower()]
+        results.append({
+            "sentiment": sentiment,
+            "score": round(score, 4),
+            "confidence": round(confidence, 4),
+        })
+    return results
+
+
+@app.post("/api/v1/predict")
+def predict_sentiment(payload: ReviewPayload):
     try:
-        sentiment, score, confidence = predict_single_text(payload.text)
-        return PredictionResponse(
-            status="success",
-            sentiment=sentiment,
-            score=score,
-            confidence=confidence
-        )
+        return {"status": "success", **predict_texts([payload.text])[0]}
     except Exception as err:
-        raise HTTPException(status_code=500, detail=str(err))
+        raise HTTPException(status_code=500, detail="Sentiment prediction failed") from err
 
-@app.post("/api/v1/predict/batch", response_model=BatchPredictionResponse)
-async def predict_sentiment_batch(payload: BatchPayload):
+
+@app.post("/api/v1/predict/batch")
+def predict_sentiment_batch(payload: BatchPayload):
     try:
-        results = []
-        for r in payload.reviews:
-            sentiment, score, confidence = predict_single_text(r.text)
-            results.append(BatchPredictionItem(
-                id=r.id,
-                sentiment=sentiment,
-                score=score,
-                confidence=confidence
-            ))
-        return BatchPredictionResponse(status="success", predictions=results)
+        predictions = predict_texts([review.text for review in payload.reviews])
+        return {
+            "status": "success",
+            "predictions": [
+                {"id": review.id, **prediction}
+                for review, prediction in zip(payload.reviews, predictions)
+            ],
+        }
     except Exception as err:
-        raise HTTPException(status_code=500, detail=str(err))
+        raise HTTPException(status_code=500, detail="Batch sentiment prediction failed") from err
+
 
 @app.get("/health")
-async def health_check():
+def health_check():
     return {
         "status": "healthy",
         "modelLoaded": True,
-        "model": "TF-IDF + Logistic Regression",
-        "version": "1.0"
+        "model": MODEL_ID,
+        "device": str(DEVICE),
+        "version": "2.0.0",
     }
-
-@app.get("/metrics")
-async def get_metrics():
-    metrics_path = os.path.join(os.path.dirname(__file__), 'evaluation', 'metrics.json')
-    if os.path.exists(metrics_path):
-        with open(metrics_path, 'r') as f:
-            data = json.load(f)
-            return {
-                "modelVersion": "1.0",
-                "trainingDate": data.get("training_date"),
-                "vocabularySize": data.get("vocabulary_size"),
-                "classes": data.get("classes"),
-                "accuracy": data.get("accuracy"),
-                "meanCvScore": data.get("mean_cv_score")
-            }
-    return {"status": "warning", "message": "Evaluation metrics.json not found."}
-
-if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
