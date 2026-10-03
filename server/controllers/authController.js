@@ -6,13 +6,13 @@ import { AuthenticationError, ConflictError, ValidationError } from '../utils/er
 const emailPattern = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 function setSessionCookie(res, token) {
-  const secure = config.nodeEnv === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${config.sessionCookieName}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secure}`);
+  const secure = config.nodeEnv === 'production' || config.cookieSameSite === 'none' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${config.sessionCookieName}=${encodeURIComponent(token)}; HttpOnly; Path=/; SameSite=${config.cookieSameSite}; Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}${secure}`);
 }
 
 function clearSessionCookie(res) {
-  const secure = config.nodeEnv === 'production' ? '; Secure' : '';
-  res.setHeader('Set-Cookie', `${config.sessionCookieName}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${secure}`);
+  const secure = config.nodeEnv === 'production' || config.cookieSameSite === 'none' ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `${config.sessionCookieName}=; HttpOnly; Path=/; SameSite=${config.cookieSameSite}; Max-Age=0${secure}`);
 }
 
 function validateCredentials({ name, email, password }, registering) {

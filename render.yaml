@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: myntrarank-api
+    runtime: node
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /health/ready
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FRONTEND_ORIGINS
+        value: https://myntrarank.vercel.app,https://chan570.github.io
+      - key: COOKIE_SAME_SITE
+        value: none
+      - key: PORT
+        value: 10000
+      - key: OPENSEARCH_NODE
+        sync: false
+      - key: OPENSEARCH_USERNAME
+        sync: false
+      - key: OPENSEARCH_PASSWORD
+        sync: false
+      - key: HF_TOKEN
+        sync: false
+      - key: HF_SENTIMENT_MODEL
+        value: cardiffnlp/twitter-roberta-base-sentiment-latest
