@@ -19,6 +19,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Pages is optional; Vercel is the primary hosted frontend. Skip cleanly until the API URL is configured.
+    if: ${{ vars.VITE_API_BASE_URL != '' }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
@@ -38,6 +40,8 @@ jobs:
 
       - name: Build
         run: npm run build
+        env:
+          VITE_API_BASE_URL: ${{ vars.VITE_API_BASE_URL }}
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3

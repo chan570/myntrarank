@@ -23,6 +23,9 @@ const DEMO_IMAGES = {
     'https://images.unsplash.com/photo-1561872726-bd3a5497939f?auto=format&fit=crop&w=760&q=80',
   ],
 };
+const PUBLIC_BASE = import.meta.env.BASE_URL.endsWith('/')
+  ? import.meta.env.BASE_URL
+  : `${import.meta.env.BASE_URL}/`;
 
 export function getProductImage(product, demoOnly = false) {
   const image = product?.image;
@@ -34,7 +37,7 @@ export function getProductImage(product, demoOnly = false) {
   const choices = DEMO_IMAGES[imageKey] || DEMO_IMAGES.default;
   if (demoOnly) {
     const fallbackKey = imageKey === 'intimate' ? 'intimates' : imageKey === 'jackets' ? 'jackets' : imageKey || 'tops';
-    return `/demo-images/${fallbackKey}.svg`;
+    return `${PUBLIC_BASE}demo-images/${fallbackKey}.svg`;
   }
   const stableId = String(product?.id || product?.title || '').split('').reduce((hash, char) => ((hash * 31) + char.charCodeAt(0)) >>> 0, 7);
   return choices[stableId % choices.length];

@@ -12,7 +12,13 @@ import { swaggerSpec } from './config/swaggerSpec.js';
 const app = express();
 app.use(helmet());
 app.use(cors({
-  origin: config.frontendOrigin,
+  origin(origin, callback) {
+    if (!origin || config.frontendOrigins.includes(origin)) {
+      callback(null, true);
+      return;
+    }
+    callback(new Error('This website origin is not allowed to call the API.'));
+  },
   credentials: true,
   methods: ['GET', 'POST', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'Idempotency-Key'],

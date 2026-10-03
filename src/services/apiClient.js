@@ -3,12 +3,31 @@
  * Connects React Frontend to Express REST API Gateway (http://localhost:5000/api)
  */
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:5000/api';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:5000/api' : '');
+const REQUEST_TIMEOUT_MS = 15000;
 const CLOTHING_SINGULARS = {
   dress: 'dresses', top: 'tops', jacket: 'jackets', blouse: 'blouses',
   skirt: 'skirts', sweater: 'sweaters', jean: 'jeans', pant: 'pants',
   short: 'shorts', coat: 'coats', intimate: 'intimates',
 };
+
+async function fetchWithTimeout(url, options = {}) {
+  if (!API_BASE_URL) {
+    throw new Error('The API URL is not configured for this deployment.');
+  }
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: controller.signal });
+  } catch (error) {
+    if (error.name === 'AbortError') {
+      throw new Error('The service is taking too long to respond. Please try again shortly.', { cause: error });
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
 
 function normalizeClothingSearch(query) {
   return query.trim().split(/\s+/).map((word) => CLOTHING_SINGULARS[word.toLowerCase()] || word).join(' ');
@@ -32,7 +51,7 @@ export const apiClient = {
         category: options.categoryFilter || options.category || 'All'
       });
 
-      const res = await fetch(`${API_BASE_URL}/search?${params}`, { credentials: 'include' });
+      const res = await fetchWithTimeout(`${API_BASE_URL}/search?${params}`, { credentials: 'include' });
       if (!res.ok) throw new Error(`HTTP error ${res.status}`);
       const json = await res.json();
       return json.data;
@@ -43,7 +62,7 @@ export const apiClient = {
 
   // Submit Review (Write Path)
   async submitReview(reviewPayload) {
-    const res = await fetch(`${API_BASE_URL}/reviews`, {
+    const res = await fetchWithTimeout(`${API_BASE_URL}/reviews`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -58,7 +77,7 @@ export const apiClient = {
   },
 
   async getCurrentUser() {
-    const response = await fetch(`${API_BASE_URL}/auth/me`, { credentials: 'include' });
+    const response = await fetchWithTimeout(`${API_BASE_URL}/auth/me`, { credentials: 'include' });
     const json = await response.json();
     if (!response.ok) throw new Error(json?.error?.message || 'Could not load account.');
     return json.user || null;
@@ -73,13 +92,13 @@ export const apiClient = {
   },
 
   async logout() {
-    const response = await fetch(`${API_BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
+    const response = await fetchWithTimeout(`${API_BASE_URL}/auth/logout`, { method: 'POST', credentials: 'include' });
     const json = await response.json();
     if (!response.ok) throw new Error(json?.error?.message || 'Could not sign out.');
   },
 
   async sendAuth(path, payload) {
-    const response = await fetch(`${API_BASE_URL}${path}`, {
+    const response = await fetchWithTimeout(`${API_BASE_URL}${path}`, {
       method: 'POST',
       credentials: 'include',
       headers: { 'Content-Type': 'application/json' },

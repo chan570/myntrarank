@@ -12,7 +12,7 @@ export function Header({
 }) {
   return (
     <header className="trust-header">
-      <a href="/" className="trust-brand" onClick={resetToHome} aria-label="TrustRank home">
+      <a href={import.meta.env.BASE_URL || '/'} className="trust-brand" onClick={resetToHome} aria-label="TrustRank home">
         <span className="trust-brand-mark">T</span>
         <span>trust<span>rank</span></span>
       </a>

@@ -41,7 +41,7 @@ The service loads the transformer once at process start. First startup downloads
 
 Requirements: Node.js compatible with the lockfile, Python 3.10+, an OpenSearch 2.x endpoint, outbound access to Hugging Face for the first model download, and enough RAM for the transformer model (CPU use is slower). The updated source ZIP does not include an OpenSearch distribution. If you still have the original `opensearch-2.11.0` folder, start it with `.\opensearch-2.11.0\bin\opensearch.bat`; otherwise install/run a local OpenSearch 2.x instance separately.
 
-1. Start a local OpenSearch endpoint that accepts HTTP without authentication, then confirm it is available at `http://localhost:9200`. The bundled development configuration disables the security plugin and is suitable only for local use. The current API client does not configure TLS or credentials for a secured/managed cluster.
+1. Start a local OpenSearch endpoint that accepts HTTP without authentication, then confirm it is available at `http://localhost:9200`. The bundled development configuration disables the security plugin and is suitable only for local use. For a secured/managed cluster, configure its HTTPS endpoint and credentials in the API environment variables.
 2. In the project root, create a local Python environment and install the NLP requirements:
 
    ```powershell
@@ -74,19 +74,20 @@ Requirements: Node.js compatible with the lockfile, Python 3.10+, an OpenSearch 
    PORT=5000
    OPENSEARCH_NODE=http://localhost:9200
    NLP_SERVICE_URL=http://localhost:8000/api/v1
-   FRONTEND_ORIGIN=http://localhost:5173
+   FRONTEND_ORIGINS=http://localhost:5173
    ```
 
-   Adjust local ports as needed. Production must use HTTPS, secure cookie delivery, a restricted `FRONTEND_ORIGIN`, protected OpenSearch access, and a managed identity/security setup. Never commit `.env`, credentials, or model access tokens.
+   Adjust local ports as needed. Production must use HTTPS, secure cookies, restricted `FRONTEND_ORIGINS`, and protected OpenSearch access. Never commit `.env`, credentials, or model access tokens.
 
-4. The Kaggle CSV and held-out catalog are included. To reproduce the catalog split from the source file, run:
+4. The held-out demo catalog is included at `server/data/demo_catalog.json`, so the demo does not need the source CSV. The Women’s Clothing CSV is excluded from this project copy because of its size and dataset licensing/distribution terms. To reproduce the catalog split or train the model yourself, download the same Kaggle dataset and set its path, then run:
 
    ```powershell
+   $env:SENTIMENT_TRAINING_CSV='C:\path\to\Womens Clothing E-Commerce Reviews.csv'
    pip install -r server/nlp_service/requirements-data.txt
    npm run prepare:dataset
    ```
 
-   This shared deterministic split keeps Clothing IDs disjoint: approximately 70% train, 15% evaluation, 15% demo catalog. The catalog reviews are not used to fit or evaluate the model.
+   The dataset preparation script reads `SENTIMENT_TRAINING_CSV`. The shared deterministic split keeps Clothing IDs disjoint: approximately 70% train, 15% evaluation, 15% demo catalog. The catalog reviews are not used to fit or evaluate the model.
 
 5. Seed the dataset catalog once, after OpenSearch and the sentiment service are ready:
 
@@ -106,6 +107,25 @@ Requirements: Node.js compatible with the lockfile, Python 3.10+, an OpenSearch 
    Readiness is available at `http://localhost:5000/health/ready`; API documentation is at `/api/docs`.
 
    If readiness returns `503`, first check that OpenSearch is reachable and then check the sentiment service at `/health`. Do not seed the catalog again if the index already contains products; the seed command intentionally skips a non-empty index.
+
+## Hosted demo deployment (Vercel frontend + Render services)
+
+GitHub Pages and Vercel serve the browser application. They do not run the Express API, OpenSearch, or the Python transformer. The repository includes `render.yaml` to create a public Express API and a private Python sentiment service on Render. Create a secured, persistent OpenSearch cluster separately, for example with Aiven for OpenSearch.
+
+1. Create the OpenSearch service first. Copy its HTTPS endpoint, username, and password. Keep the endpoint and credentials private; the API connection uses `OPENSEARCH_NODE`, `OPENSEARCH_USERNAME`, and `OPENSEARCH_PASSWORD`.
+2. In Render, choose **New > Blueprint Instance**, connect `chan570/myntrarank`, and use the repository's `render.yaml`. Select a compute plan with enough memory for the PyTorch sentiment model. Enter the OpenSearch values when Render prompts for the `sync: false` variables. The Blueprint creates the API and private NLP service in the same Render region.
+3. Wait for the NLP service to finish loading the model. Check `/health` from the Render service's internal shell/logs; it should report `modelLoaded: true`. Check the API's public `/health/ready` endpoint; it should report `status: ready`.
+4. Seed the demo catalog once from the API service's shell by running `npm run seed`. The command skips seeding if products already exist. The checked-in held-out catalog is at `server/data/demo_catalog.json`.
+5. Copy the public API origin from Render, for example `https://myntrarank-api.onrender.com` (do not include `/api`). In the Vercel project, open **Settings > Environment Variables** and add:
+
+   - `TRUSTRANK_API_ORIGIN` = the Render API origin, for example `https://myntrarank-api.onrender.com`
+   - `VITE_API_BASE_URL` = `/api`
+
+   Select Production (and Preview if needed), save, and redeploy. The small `api/[...route].js` function in this repository forwards Vercel's same-origin `/api` requests to Render, so browser sign-in cookies stay on the Vercel site. Do not add OpenSearch credentials to Vercel or to any `VITE_` variable; Vite variables are included in browser code.
+6. GitHub Pages is optional. If you want that URL to work too, add a repository variable named `VITE_API_BASE_URL` in **GitHub > Settings > Secrets and variables > Actions > Variables** with the direct API URL, for example `https://myntrarank-api.onrender.com/api`, then rerun the Pages workflow. Until the variable exists, the Pages workflow skips instead of failing. Use the Vercel deployment as the main hosted demo because the same-origin API proxy also avoids cross-site session-cookie restrictions.
+7. Test the Vercel site: featured products should load; search and category browsing should return results; register/sign-in should work; submit a review and search again to see updated ranking. The API allows the Vercel and GitHub Pages origins listed in `render.yaml`.
+
+The transformer service needs enough RAM to load PyTorch and its model. Check the provider's current plan and pricing before creating resources. For real production use, add backups, monitoring, and stronger account storage; the demo currently stores accounts, sessions, and reviews in OpenSearch.
 
 ## Optional domain fine-tuning
 

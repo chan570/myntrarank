@@ -9,6 +9,8 @@ import { NotFoundError } from '../utils/errors.js';
 
 const INDEX_NAME = 'myntrarank_products';
 const OPENSEARCH_NODE = process.env.OPENSEARCH_NODE || 'http://localhost:9200';
+const OPENSEARCH_USERNAME = process.env.OPENSEARCH_USERNAME || '';
+const OPENSEARCH_PASSWORD = process.env.OPENSEARCH_PASSWORD || '';
 const CLOTHING_SINGULARS = {
   dress: 'dresses', top: 'tops', jacket: 'jackets', blouse: 'blouses',
   skirt: 'skirts', sweater: 'sweaters', jean: 'jeans', pant: 'pants',
@@ -17,8 +19,13 @@ const CLOTHING_SINGULARS = {
 
 export class OpenSearchEngine {
   constructor() {
+    if (Boolean(OPENSEARCH_USERNAME) !== Boolean(OPENSEARCH_PASSWORD)) {
+      throw new Error('Set both OPENSEARCH_USERNAME and OPENSEARCH_PASSWORD, or leave both empty for local development.');
+    }
+
     this.client = new Client({
       node: OPENSEARCH_NODE,
+      ...(OPENSEARCH_USERNAME ? { auth: { username: OPENSEARCH_USERNAME, password: OPENSEARCH_PASSWORD } } : {}),
       requestTimeout: 10000
     });
     this.initPromise = null;

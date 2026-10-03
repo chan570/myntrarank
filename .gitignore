@@ -26,7 +26,6 @@ dist-ssr
 
 opensearch-2.11.0/
 data/*.csv
-server/data/demo_catalog.json
 *.pkl
 *.bak
 __pycache__/
