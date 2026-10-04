@@ -3,7 +3,7 @@ services:
     name: myntrarank-api
     runtime: node
     buildCommand: npm ci
-    startCommand: npm start
+    startCommand: npm run seed && npm start
     healthCheckPath: /health/ready
     envVars:
       - key: NODE_ENV
