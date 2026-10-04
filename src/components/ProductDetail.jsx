@@ -2,6 +2,14 @@ import { useRef, useState } from 'react';
 import { getProductImage } from '../services/productImagery';
 import { getEvidenceAdjustedTrust, getReviewCount } from '../services/rankingDisplay';
 
+const getSentimentLabel = (review) => {
+  const score = Number(review.sentimentPolarityScore ?? review.sentimentScore);
+  if (!Number.isFinite(score) || score < 0 || score > 1) return 'Sentiment unavailable';
+  if (score >= 0.6) return 'Positive';
+  if (score <= 0.4) return 'Negative';
+  return 'Neutral';
+};
+
 export const ProductDetail = ({
   selectedProduct,
   backToSearchResults,
@@ -100,7 +108,7 @@ export const ProductDetail = ({
                 <div className="metric-label">Customer rating</div>
                 <p className="metric-note">From {reviewCount} review{reviewCount === 1 ? '' : 's'}</p>
               </div>
-              <div className="metric-box">
+              <div className="metric-box metric-box-trust">
                 <div className="metric-num">{Math.round(compositeTrust * 100)}/100</div>
                 <div className="metric-label">Review trust</div>
                 <p className="metric-note">A guide, not proof that reviews are genuine.</p>
@@ -149,7 +157,12 @@ export const ProductDetail = ({
                 <div key={idx} className="pdp-review-card">
                   <div className="review-card-header">
                     <span className="reviewer-name">{rev.reviewerName || 'Anonymous dataset review'}</span>
-                    <span className="review-star-badge">{rev.rating} ★</span>
+                    <div className="review-card-badges">
+                      <span className={`review-sentiment-badge sentiment-${getSentimentLabel(rev).toLowerCase().replaceAll(' ', '-')}`} title="Estimated sentiment from the review text">
+                        {getSentimentLabel(rev)}
+                      </span>
+                      <span className="review-star-badge">{rev.rating} ★</span>
+                    </div>
                   </div>
                   <p className="review-text">{rev.text}</p>
                   <div className="review-footer">
